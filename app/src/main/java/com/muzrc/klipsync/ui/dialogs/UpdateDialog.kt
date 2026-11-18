@@ -47,8 +47,7 @@ fun UpdateDialog(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "Nota Perubahan:
-${state.release.releaseNotes}",
+                            text = "Nota Perubahan:\n${state.release.releaseNotes}",
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }

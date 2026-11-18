@@ -14,6 +14,7 @@ import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.OverlayEffect
+import com.google.common.collect.ImmutableList
 import com.muzrc.klipsync.model.SubtitleFontFamily
 import com.muzrc.klipsync.model.SubtitleItem
 import com.muzrc.klipsync.model.SubtitlePosition
@@ -24,7 +25,7 @@ object SubtitleOverlayBuilder {
     fun buildSubtitleEffect(subtitles: List<SubtitleItem>): Effect? {
         if (subtitles.isEmpty()) return null
         val overlay = TimedSubtitleBitmapOverlay(subtitles)
-        return OverlayEffect(listOf(overlay))
+        return OverlayEffect(ImmutableList.of(overlay))
     }
 
     private class TimedSubtitleBitmapOverlay(
