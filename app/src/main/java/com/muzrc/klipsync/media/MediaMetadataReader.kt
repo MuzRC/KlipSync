@@ -63,8 +63,17 @@ class MediaMetadataReader(private val context: Context) {
         )
     }
 
-    suspend fun readAudioTrack(uri: Uri): AudioTrackConfig = withContext(Dispatchers.IO) {
-        val displayName = resolveDisplayName(uri) ?: "Audio_${System.currentTimeMillis()}.mp3"
+    suspend fun readAudioTrack(
+        uri: Uri,
+        isExtractedFromVideo: Boolean = false
+    ): AudioTrackConfig = withContext(Dispatchers.IO) {
+        val rawName = resolveDisplayName(uri) ?: "Audio_${System.currentTimeMillis()}.mp3"
+        val displayName = if (isExtractedFromVideo) {
+            "Audio dari ${rawName.substringBeforeLast('.')}"
+        } else {
+            rawName
+        }
+
         val retriever = MediaMetadataRetriever()
         var durationMs = 0L
 
@@ -82,15 +91,19 @@ class MediaMetadataReader(private val context: Context) {
             }
         }
 
+        val peaks = AudioWaveformExtractor.extractWaveformPeaks(context, uri)
+
         AudioTrackConfig(
             uri = uri,
             displayName = displayName,
+            isExtractedFromVideo = isExtractedFromVideo,
             totalDurationMs = durationMs,
-            startOffsetMs = 0L
+            startOffsetMs = 0L,
+            waveformPeaks = peaks
         )
     }
 
-    private fun resolveDisplayName(uri: Uri): String? {
+    fun resolveDisplayName(uri: Uri): String? {
         if (uri.scheme == "content") {
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                 val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)

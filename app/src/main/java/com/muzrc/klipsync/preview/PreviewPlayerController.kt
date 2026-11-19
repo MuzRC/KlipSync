@@ -3,6 +3,7 @@ package com.muzrc.klipsync.preview
 import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -24,7 +25,8 @@ class PreviewPlayerController(context: Context) {
         repeatMode = Player.REPEAT_MODE_OFF
     }
 
-    private var clipDurationsMs: List<Long> = emptyList()
+    private var expandedClipsCache: List<VideoClip> = emptyList()
+    private var clipPlayedDurationsMs: List<Long> = emptyList()
     private var totalVideoDurationMs: Long = 0L
     private var audioConfig: AudioTrackConfig = AudioTrackConfig()
     private var endBehavior: VideoEndBehavior = VideoEndBehavior.FREEZE_FRAME
@@ -44,7 +46,7 @@ class PreviewPlayerController(context: Context) {
             append(transitionConfig.durationMs).append(":")
             append(transitionConfig.endBehavior.name).append("|")
             clips.forEach {
-                append("${it.id}:${it.uri}:${it.trimStartMs}:${it.trimEndMs}:${it.loopCount};")
+                append("${it.id}:${it.uri}:${it.trimStartMs}:${it.trimEndMs}:${it.loopCount}:${it.speed};")
             }
         }
 
@@ -59,6 +61,7 @@ class PreviewPlayerController(context: Context) {
             rebuildAudioItem(audio)
         }
 
+        applyCurrentClipSpeed()
         applyVolumes(currentTimelinePositionMs())
     }
 
@@ -70,7 +73,8 @@ class PreviewPlayerController(context: Context) {
         videoPlayer.clearMediaItems()
 
         if (clips.isEmpty()) {
-            clipDurationsMs = emptyList()
+            expandedClipsCache = emptyList()
+            clipPlayedDurationsMs = emptyList()
             totalVideoDurationMs = 0L
             return
         }
@@ -78,6 +82,7 @@ class PreviewPlayerController(context: Context) {
         val expandedClips = clips.flatMap { clip ->
             List(clip.loopCount.coerceAtLeast(1)) { clip }
         }
+        expandedClipsCache = expandedClips
 
         val overlapHalfMs = if (transitionConfig.joinMode == JoinMode.OVERLAP && expandedClips.size > 1) {
             (transitionConfig.durationMs / 2L).coerceAtLeast(0L)
@@ -85,26 +90,28 @@ class PreviewPlayerController(context: Context) {
             0L
         }
 
-        val durations = mutableListOf<Long>()
+        val playedDurations = mutableListOf<Long>()
         val items = mutableListOf<MediaItem>()
 
         expandedClips.forEachIndexed { index, clip ->
             val isFirst = index == 0
             val isLast = index == expandedClips.lastIndex
+            val safeSpeed = clip.speed.coerceIn(0.25f, 4.0f)
 
             val start = if (!isFirst) {
-                (clip.trimStartMs + overlapHalfMs).coerceAtMost(clip.trimEndMs)
+                (clip.trimStartMs + (overlapHalfMs * safeSpeed).toLong()).coerceAtMost(clip.trimEndMs)
             } else {
                 clip.trimStartMs
             }
 
             val end = if (!isLast) {
-                (clip.trimEndMs - overlapHalfMs).coerceAtLeast(start)
+                (clip.trimEndMs - (overlapHalfMs * safeSpeed).toLong()).coerceAtLeast(start)
             } else {
                 clip.trimEndMs
             }
 
-            durations.add((end - start).coerceAtLeast(0L))
+            val playedDur = ((end - start) / safeSpeed).toLong().coerceAtLeast(0L)
+            playedDurations.add(playedDur)
 
             val clipping = MediaItem.ClippingConfiguration.Builder()
                 .setStartPositionMs(start)
@@ -119,8 +126,8 @@ class PreviewPlayerController(context: Context) {
             )
         }
 
-        clipDurationsMs = durations
-        totalVideoDurationMs = durations.sum()
+        clipPlayedDurationsMs = playedDurations
+        totalVideoDurationMs = playedDurations.sum()
         videoPlayer.repeatMode = if (transitionConfig.endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
             Player.REPEAT_MODE_ALL
         } else {
@@ -151,6 +158,20 @@ class PreviewPlayerController(context: Context) {
         audioPlayer.prepare()
     }
 
+    fun currentActiveClip(): VideoClip? {
+        if (expandedClipsCache.isEmpty()) return null
+        val idx = videoPlayer.currentMediaItemIndex.coerceIn(0, expandedClipsCache.lastIndex)
+        return expandedClipsCache[idx]
+    }
+
+    private fun applyCurrentClipSpeed() {
+        val activeClip = currentActiveClip() ?: return
+        val targetSpeed = activeClip.speed.coerceIn(0.25f, 4.0f)
+        if (abs(videoPlayer.playbackParameters.speed - targetSpeed) > 0.01f) {
+            videoPlayer.playbackParameters = PlaybackParameters(targetSpeed)
+        }
+    }
+
     fun play(totalTimelineDurationMs: Long) {
         if (totalTimelineDurationMs <= 0L) return
         val currentPos = currentTimelinePositionMs()
@@ -158,6 +179,7 @@ class PreviewPlayerController(context: Context) {
             seekTo(0L)
         }
 
+        applyCurrentClipSpeed()
         val canPlayVideo = totalVideoDurationMs > 0L && (
             endBehavior == VideoEndBehavior.LOOP_TO_AUDIO ||
                 currentTimelinePositionMs() < totalVideoDurationMs
@@ -188,16 +210,20 @@ class PreviewPlayerController(context: Context) {
             }
         }
 
+        applyCurrentClipSpeed()
         applyVolumes(targetMs)
     }
 
     private fun seekVideoOnly(targetMs: Long) {
-        if (clipDurationsMs.isEmpty() || totalVideoDurationMs <= 0L) return
+        if (clipPlayedDurationsMs.isEmpty() || totalVideoDurationMs <= 0L) return
 
         if (targetMs >= totalVideoDurationMs && endBehavior == VideoEndBehavior.FREEZE_FRAME) {
-            val lastIndex = clipDurationsMs.lastIndex
-            val lastClipEndOffset = (clipDurationsMs[lastIndex] - 40L).coerceAtLeast(0L)
-            videoPlayer.seekTo(lastIndex, lastClipEndOffset)
+            val lastIndex = clipPlayedDurationsMs.lastIndex
+            val lastClip = expandedClipsCache.getOrNull(lastIndex)
+            val speed = lastClip?.speed?.coerceIn(0.25f, 4.0f) ?: 1f
+            val rawEndOffset = ((clipPlayedDurationsMs[lastIndex] * speed).toLong() - 40L)
+                .coerceAtLeast(0L)
+            videoPlayer.seekTo(lastIndex, rawEndOffset)
             videoPlayer.pause()
         } else {
             val mappedVideoPos = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
@@ -206,25 +232,27 @@ class PreviewPlayerController(context: Context) {
                 targetMs
             }
             var accumulated = 0L
-            for (i in clipDurationsMs.indices) {
-                val dur = clipDurationsMs[i]
-                if (mappedVideoPos < accumulated + dur || i == clipDurationsMs.lastIndex) {
-                    val localPos = (mappedVideoPos - accumulated).coerceIn(0L, dur)
-                    videoPlayer.seekTo(i, localPos)
+            for (i in clipPlayedDurationsMs.indices) {
+                val playedDur = clipPlayedDurationsMs[i]
+                if (mappedVideoPos < accumulated + playedDur || i == clipPlayedDurationsMs.lastIndex) {
+                    val speed = expandedClipsCache.getOrNull(i)?.speed?.coerceIn(0.25f, 4.0f) ?: 1f
+                    val localPlayedPos = (mappedVideoPos - accumulated).coerceIn(0L, playedDur)
+                    val localRawPos = (localPlayedPos * speed).toLong()
+                    videoPlayer.seekTo(i, localRawPos)
                     break
                 }
-                accumulated += dur
+                accumulated += playedDur
             }
         }
     }
 
     fun tickSync(isPlaying: Boolean, totalTimelineDurationMs: Long): Long {
+        applyCurrentClipSpeed()
         val hasAudio = audioConfig.uri != null && audioConfig.effectiveAudioDurationMs > 0L
         val pos = currentTimelinePositionMs().coerceIn(0L, totalTimelineDurationMs)
         applyVolumes(pos)
 
         if (isPlaying) {
-            // Kunci sync: jadikan audio sebagai master clock jika lagu aktif
             if (hasAudio && totalVideoDurationMs > 0L && pos < audioConfig.effectiveAudioDurationMs) {
                 val expectedVideoPos = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
                     pos % totalVideoDurationMs
@@ -233,10 +261,10 @@ class PreviewPlayerController(context: Context) {
                 }
 
                 val actualVideoPos = getRawVideoPositionMs()
-                // Jika video terlewat > 140ms semasa pertukaran klip, selaraskan semula serta-merta
                 if (pos < totalVideoDurationMs || endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
-                    if (abs(expectedVideoPos - actualVideoPos) > 140L) {
+                    if (abs(expectedVideoPos - actualVideoPos) > 150L) {
                         seekVideoOnly(pos)
+                        applyCurrentClipSpeed()
                         if (!videoPlayer.isPlaying) {
                             videoPlayer.play()
                         }
@@ -262,14 +290,15 @@ class PreviewPlayerController(context: Context) {
     }
 
     private fun getRawVideoPositionMs(): Long {
-        if (clipDurationsMs.isEmpty() || totalVideoDurationMs <= 0L) return 0L
-        val idx = videoPlayer.currentMediaItemIndex.coerceIn(0, clipDurationsMs.lastIndex)
+        if (clipPlayedDurationsMs.isEmpty() || totalVideoDurationMs <= 0L) return 0L
+        val idx = videoPlayer.currentMediaItemIndex.coerceIn(0, clipPlayedDurationsMs.lastIndex)
         var before = 0L
         for (i in 0 until idx) {
-            before += clipDurationsMs[i]
+            before += clipPlayedDurationsMs[i]
         }
-        return (before + videoPlayer.currentPosition.coerceAtLeast(0L))
-            .coerceAtMost(totalVideoDurationMs)
+        val speed = expandedClipsCache.getOrNull(idx)?.speed?.coerceIn(0.25f, 4.0f) ?: 1f
+        val currentClipPlayedMs = (videoPlayer.currentPosition.coerceAtLeast(0L) / speed).toLong()
+        return (before + currentClipPlayedMs).coerceAtMost(totalVideoDurationMs)
     }
 
     fun currentTimelinePositionMs(): Long {
