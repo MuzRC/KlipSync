@@ -236,9 +236,24 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun applyMotionEffectToAllClips(effect: CameraMotionEffect) {
+    fun setClipMotionIntensity(clipId: String, intensity: Float) {
         _uiState.update { state ->
-            val updatedClips = state.clips.map { it.copy(motionEffect = effect) }
+            val safeVal = intensity.coerceIn(0.05f, 0.50f)
+            val updatedClips = state.clips.map { clip ->
+                if (clip.id == clipId) clip.copy(motionIntensity = safeVal) else clip
+            }
+            val updated = state.copy(clips = updatedClips)
+            syncPreviewWithState(updated)
+            updated
+        }
+    }
+
+    fun applyMotionEffectToAllClips(effect: CameraMotionEffect, intensity: Float) {
+        _uiState.update { state ->
+            val safeVal = intensity.coerceIn(0.05f, 0.50f)
+            val updatedClips = state.clips.map {
+                it.copy(motionEffect = effect, motionIntensity = safeVal)
+            }
             val updated = state.copy(clips = updatedClips)
             syncPreviewWithState(updated)
             updated
