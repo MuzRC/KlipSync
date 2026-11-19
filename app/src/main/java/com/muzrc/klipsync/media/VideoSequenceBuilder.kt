@@ -344,21 +344,21 @@ class VideoSequenceBuilder(private val context: Context) {
             when (effect) {
                 CameraMotionEffect.NONE -> Unit
                 CameraMotionEffect.ZOOM_IN -> {
-                    val scale = 1.0f + (0.15f * progress)
+                    val scale = 1.0f + (0.22f * progress)
                     matrix.postScale(scale, scale)
                 }
                 CameraMotionEffect.ZOOM_OUT -> {
-                    val scale = 1.15f - (0.15f * progress)
+                    val scale = 1.22f - (0.22f * progress)
                     matrix.postScale(scale, scale)
                 }
                 CameraMotionEffect.PAN_LEFT -> {
-                    matrix.postScale(1.12f, 1.12f)
-                    val translateX = 0.10f - (0.20f * progress)
+                    matrix.postScale(1.18f, 1.18f)
+                    val translateX = 0.14f - (0.28f * progress)
                     matrix.postTranslate(translateX, 0f)
                 }
                 CameraMotionEffect.PAN_RIGHT -> {
-                    matrix.postScale(1.12f, 1.12f)
-                    val translateX = -0.10f + (0.20f * progress)
+                    matrix.postScale(1.18f, 1.18f)
+                    val translateX = -0.14f + (0.28f * progress)
                     matrix.postTranslate(translateX, 0f)
                 }
             }
