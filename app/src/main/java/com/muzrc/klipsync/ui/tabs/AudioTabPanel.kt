@@ -2,6 +2,7 @@ package com.muzrc.klipsync.ui.tabs
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Button
@@ -43,7 +45,7 @@ import com.muzrc.klipsync.util.TimeFormatter
 @Composable
 fun AudioTabPanel(
     audioConfig: AudioTrackConfig,
-    onSelectAudio: (Uri) -> Unit,
+    onSelectAudio: (Uri, Boolean) -> Unit,
     onRemoveAudio: () -> Unit,
     onStartOffsetChange: (Long) -> Unit,
     onToggleMuteOriginal: () -> Unit,
@@ -56,7 +58,15 @@ fun AudioTabPanel(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            onSelectAudio(uri)
+            onSelectAudio(uri, false)
+        }
+    }
+
+    val videoAudioExtractorPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            onSelectAudio(uri, true)
         }
     }
 
@@ -69,23 +79,41 @@ fun AudioTabPanel(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Button(
-            onClick = { audioPicker.launch("audio/*") },
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(Icons.Rounded.AudioFile, contentDescription = null)
-            Text(
-                text = if (audioConfig.uri == null) "Pilih Fail Lagu / Audio" else "Tukar Lagu",
-                modifier = Modifier.padding(start = 6.dp),
-                fontWeight = FontWeight.SemiBold
-            )
+            Button(
+                onClick = { audioPicker.launch("audio/*") },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Rounded.AudioFile, contentDescription = null)
+                Text(
+                    text = "Pilih Lagu",
+                    modifier = Modifier.padding(start = 6.dp),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    videoAudioExtractorPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                    )
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Rounded.Movie, contentDescription = null)
+                Text(
+                    text = "Ekstrak Video",
+                    modifier = Modifier.padding(start = 6.dp)
+                )
+            }
         }
 
         if (audioConfig.uri != null) {
             Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(
                     modifier = Modifier
@@ -115,7 +143,6 @@ fun AudioTabPanel(
                         }
                     }
 
-                    // Slider Mula Lagu + Butang Fine-Tune Beat
                     Text(
                         text = "Mula Lagu: ${TimeFormatter.formatPreciseMs(audioConfig.startOffsetMs)} / ${TimeFormatter.formatDurationMs(audioConfig.totalDurationMs)}",
                         style = MaterialTheme.typography.labelMedium,
@@ -156,7 +183,7 @@ fun AudioTabPanel(
                     )
 
                     Text(
-                        text = "Kesan Fade In (Masuk Lembut)",
+                        text = "Kesan Fade In",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -171,7 +198,7 @@ fun AudioTabPanel(
                     }
 
                     Text(
-                        text = "Kesan Fade Out (Tamat Lembut)",
+                        text = "Kesan Fade Out",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -189,9 +216,7 @@ fun AudioTabPanel(
         }
 
         Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            )
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(
                 modifier = Modifier

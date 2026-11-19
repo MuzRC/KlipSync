@@ -1,7 +1,9 @@
 package com.muzrc.klipsync.ui.components
 
+import android.graphics.ColorMatrixColorFilter
 import android.view.ViewGroup
 import androidx.annotation.OptIn
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -14,12 +16,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -31,29 +37,52 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.muzrc.klipsync.media.ColorMatrixBuilder
 import com.muzrc.klipsync.model.AspectRatioPreset
+import com.muzrc.klipsync.model.ColorFilterConfig
+import com.muzrc.klipsync.model.CropScaleMode
 import com.muzrc.klipsync.model.SubtitleFontFamily
 import com.muzrc.klipsync.model.SubtitleItem
 import com.muzrc.klipsync.model.SubtitlePosition
+import com.muzrc.klipsync.model.VideoClip
+import com.muzrc.klipsync.model.WatermarkConfig
+import com.muzrc.klipsync.model.WatermarkPosition
 
 @OptIn(UnstableApi::class)
 @Composable
 fun LivePreviewCanvas(
     videoPlayer: ExoPlayer,
     hasClips: Boolean,
+    activeClip: VideoClip?,
     aspectRatio: AspectRatioPreset,
+    cropScaleMode: CropScaleMode,
+    colorConfig: ColorFilterConfig,
     subtitles: List<SubtitleItem>,
+    watermarkConfig: WatermarkConfig,
     currentPositionMs: Long,
     totalVideoDurationMs: Long,
     freezeFrameExtensionMs: Long,
     isInFreezeFrameZone: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+
+    val watermarkBitmap = remember(watermarkConfig.uri) {
+        val uri = watermarkConfig.uri ?: return@remember null
+        try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream)?.asImageBitmap()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .background(Color.Black)
-            .padding(vertical = 8.dp),
+            .padding(vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         if (!hasClips) {
@@ -82,7 +111,6 @@ fun LivePreviewCanvas(
             Modifier.fillMaxSize()
         }
 
-        // Kira skala Slow Zoom masa nyata semasa berada dalam zon Freeze Frame
         val freezeZoomScale = if (isInFreezeFrameZone && freezeFrameExtensionMs > 0L) {
             val elapsed = (currentPositionMs - totalVideoDurationMs).coerceAtLeast(0L)
             val progress = (elapsed.toFloat() / freezeFrameExtensionMs.toFloat()).coerceIn(0f, 1f)
@@ -91,10 +119,19 @@ fun LivePreviewCanvas(
             1.0f
         }
 
+        val rotDeg = (activeClip?.rotationDegrees ?: 0).toFloat()
+        val mirrorScaleX = if (activeClip?.isMirrored == true) -1f else 1f
+
+        val containerBg = if (cropScaleMode == CropScaleMode.FIT_BLUR) {
+            Color(0xFF1A1E29)
+        } else {
+            Color.Black
+        }
+
         Box(
             modifier = frameModifier
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.Black)
+                .background(containerBg)
                 .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
         ) {
             AndroidView(
@@ -111,19 +148,58 @@ fun LivePreviewCanvas(
                 },
                 update = { view ->
                     view.player = videoPlayer
-                    view.resizeMode = if (aspectRatio == AspectRatioPreset.ORIGINAL) {
+                    view.resizeMode = if (
+                        aspectRatio == AspectRatioPreset.ORIGINAL ||
+                        cropScaleMode == CropScaleMode.FIT_BLUR
+                    ) {
                         AspectRatioFrameLayout.RESIZE_MODE_FIT
                     } else {
                         AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     }
+
+                    // Pratonton penapis warna secara langsung pada videoSurfaceView
+                    val m = ColorMatrixBuilder.computeCombined4x4Matrix(colorConfig)
+                    val androidColorMatrix = android.graphics.ColorMatrix(
+                        floatArrayOf(
+                            m[0], m[4], m[8], m[12], m[3] * 255f,
+                            m[1], m[5], m[9], m[13], m[7] * 255f,
+                            m[2], m[6], m[10], m[14], m[11] * 255f,
+                            0f, 0f, 0f, 1f, 0f
+                        )
+                    )
+                    val paint = android.graphics.Paint().apply {
+                        colorFilter = ColorMatrixColorFilter(androidColorMatrix)
+                    }
+                    view.videoSurfaceView?.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, paint)
                 },
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        scaleX = freezeZoomScale
+                        scaleX = freezeZoomScale * mirrorScaleX
                         scaleY = freezeZoomScale
+                        rotationZ = rotDeg
                     }
             )
+
+            // Paparan Logo / Watermark PNG
+            if (watermarkBitmap != null) {
+                val wmAlign = when (watermarkConfig.position) {
+                    WatermarkPosition.TOP_LEFT -> Alignment.TopStart
+                    WatermarkPosition.TOP_RIGHT -> Alignment.TopEnd
+                    WatermarkPosition.BOTTOM_LEFT -> Alignment.BottomStart
+                    WatermarkPosition.BOTTOM_RIGHT -> Alignment.BottomEnd
+                    WatermarkPosition.CENTER -> Alignment.Center
+                }
+                Image(
+                    bitmap = watermarkBitmap,
+                    contentDescription = "Logo",
+                    modifier = Modifier
+                        .align(wmAlign)
+                        .padding(10.dp)
+                        .fillMaxWidth(watermarkConfig.scalePercent.coerceIn(0.08f, 0.55f))
+                        .alpha(watermarkConfig.opacity.coerceIn(0.15f, 1.0f))
+                )
+            }
 
             if (isInFreezeFrameZone) {
                 Text(
@@ -132,13 +208,14 @@ fun LivePreviewCanvas(
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
+                        .align(Alignment.TopStart)
                         .padding(8.dp)
                         .background(MaterialTheme.colorScheme.tertiary, RoundedCornerShape(4.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
 
+            // Pratonton Lirik / Sarikata
             val activeSubtitles = subtitles.filter {
                 currentPositionMs in it.startMs..it.endMs && it.text.isNotBlank()
             }
@@ -166,7 +243,7 @@ fun LivePreviewCanvas(
                 Box(
                     modifier = Modifier
                         .align(alignment)
-                        .padding(horizontal = 14.dp, vertical = 20.dp)
+                        .padding(horizontal = 14.dp, vertical = 18.dp)
                 ) {
                     Text(
                         text = item.text,

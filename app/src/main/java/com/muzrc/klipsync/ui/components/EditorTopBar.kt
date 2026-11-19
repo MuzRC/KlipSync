@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,6 +28,7 @@ import com.muzrc.klipsync.BuildConfig
 fun EditorTopBar(
     hasClips: Boolean,
     isCheckingUpdate: Boolean,
+    onDraftsClick: () -> Unit,
     onCheckUpdateClick: () -> Unit,
     onExportClick: () -> Unit
 ) {
@@ -38,13 +40,13 @@ fun EditorTopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
                     text = "KlipSync",
@@ -61,8 +63,16 @@ fun EditorTopBar(
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
+                IconButton(onClick = onDraftsClick) {
+                    Icon(
+                        imageVector = Icons.Rounded.FolderOpen,
+                        contentDescription = "Draf Projek",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 IconButton(
                     onClick = onCheckUpdateClick,
                     enabled = !isCheckingUpdate
@@ -92,7 +102,7 @@ fun EditorTopBar(
                     )
                     Text(
                         text = "Eksport",
-                        modifier = Modifier.padding(start = 6.dp),
+                        modifier = Modifier.padding(start = 4.dp),
                         fontWeight = FontWeight.SemiBold
                     )
                 }

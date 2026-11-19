@@ -25,21 +25,28 @@ import com.muzrc.klipsync.ui.components.EditorTopBar
 import com.muzrc.klipsync.ui.components.LivePreviewCanvas
 import com.muzrc.klipsync.ui.components.MultiTrackTimeline
 import com.muzrc.klipsync.ui.components.PlaybackControlBar
+import com.muzrc.klipsync.ui.dialogs.DraftsDialog
 import com.muzrc.klipsync.ui.dialogs.ExportDialog
 import com.muzrc.klipsync.ui.dialogs.SubtitleEditorDialog
 import com.muzrc.klipsync.ui.dialogs.UpdateDialog
 import com.muzrc.klipsync.ui.tabs.AudioTabPanel
+import com.muzrc.klipsync.ui.tabs.BeatTabPanel
 import com.muzrc.klipsync.ui.tabs.ClipsTabPanel
+import com.muzrc.klipsync.ui.tabs.ColorTabPanel
 import com.muzrc.klipsync.ui.tabs.CropTabPanel
+import com.muzrc.klipsync.ui.tabs.SpeedTabPanel
 import com.muzrc.klipsync.ui.tabs.SubtitlesTabPanel
+import com.muzrc.klipsync.ui.tabs.WatermarkTabPanel
 import com.muzrc.klipsync.viewmodel.EditorViewModel
 
 @OptIn(UnstableApi::class)
 @Composable
 fun EditorScreen(viewModel: EditorViewModel) {
     val state by viewModel.uiState.collectAsState()
+    val drafts by viewModel.drafts.collectAsState()
 
     var showExportDialog by remember { mutableStateOf(false) }
+    var showDraftsDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var editingSubtitle by remember { mutableStateOf<SubtitleItem?>(null) }
 
@@ -47,11 +54,18 @@ fun EditorScreen(viewModel: EditorViewModel) {
         state.freezeFrameExtensionMs > 0L &&
         state.currentPositionMs >= state.totalVideoDurationMs
 
+    val currentPlayingClip = viewModel.playerController.currentActiveClip() ?: state.selectedClip
+
     Scaffold(
         topBar = {
             EditorTopBar(
                 hasClips = state.clips.isNotEmpty(),
                 isCheckingUpdate = state.updateCheckState is UpdateCheckState.Checking,
+                onDraftsClick = {
+                    viewModel.pausePlayback()
+                    viewModel.refreshDrafts()
+                    showDraftsDialog = true
+                },
                 onCheckUpdateClick = { viewModel.checkForUpdatesManual() },
                 onExportClick = {
                     viewModel.pausePlayback()
@@ -66,18 +80,23 @@ fun EditorScreen(viewModel: EditorViewModel) {
                 .padding(innerPadding)
                 .navigationBarsPadding()
         ) {
+            // Zon 1: Pemain Pratonton Langsung
             LivePreviewCanvas(
                 videoPlayer = viewModel.playerController.videoPlayer,
                 hasClips = state.clips.isNotEmpty(),
+                activeClip = currentPlayingClip,
                 aspectRatio = state.aspectRatio,
+                cropScaleMode = state.cropScaleMode,
+                colorConfig = state.colorConfig,
                 subtitles = state.subtitles,
+                watermarkConfig = state.watermarkConfig,
                 currentPositionMs = state.currentPositionMs,
                 totalVideoDurationMs = state.totalVideoDurationMs,
                 freezeFrameExtensionMs = state.freezeFrameExtensionMs,
                 isInFreezeFrameZone = isInFreezeFrameZone,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(0.36f)
+                    .weight(0.35f)
             )
 
             PlaybackControlBar(
@@ -90,47 +109,66 @@ fun EditorScreen(viewModel: EditorViewModel) {
 
             HorizontalDivider()
 
+            // Zon 2: Garis Masa Multi-Trek (Klip + Waveform Audio + Beat Markers)
             MultiTrackTimeline(
                 clips = state.clips,
+                selectedClipId = state.selectedClip?.id,
                 audioConfig = state.audioConfig,
                 subtitles = state.subtitles,
                 freezeFrameExtensionMs = state.freezeFrameExtensionMs,
-                autoLoopExtensionMs = state.autoLoopExtensionMs
+                autoLoopExtensionMs = state.autoLoopExtensionMs,
+                onSelectClip = { viewModel.selectClip(it) }
             )
 
             HorizontalDivider()
 
-            EditorTabBar(
-                activeTab = state.activeTab,
-                onSelectTab = { viewModel.selectTab(it) }
-            )
-
+            // Zon 3: Panel Kawalan Aktif (Boleh Skrol Tegak)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(0.64f)
+                    .weight(0.65f)
             ) {
                 when (state.activeTab) {
                     EditorTab.CLIPS -> ClipsTabPanel(
                         clips = state.clips,
+                        selectedClipId = state.selectedClip?.id,
                         transitionConfig = state.transitionConfig,
                         hasLongerAudio = state.extraAudioExtensionMs > 0L,
+                        onSelectClip = { viewModel.selectClip(it) },
                         onAddClips = { viewModel.addVideoClips(it) },
                         onRemoveClip = { viewModel.removeClip(it) },
                         onMoveUp = { viewModel.moveClipUp(it) },
                         onMoveDown = { viewModel.moveClipDown(it) },
                         onTrimClip = { id, s, e -> viewModel.updateClipTrim(id, s, e) },
-                        onCutClip = { viewModel.cutClipAtCurrentPosition(it) },
+                        onCutClip = { id -> viewModel.cutClipAtTimelinePosition(id, state.currentPositionMs) },
                         onLoopCountChange = { id, count -> viewModel.setClipLoopCount(id, count) },
+                        onRotateClip = { viewModel.rotateClip90(it) },
+                        onMirrorClip = { viewModel.toggleClipMirror(it) },
                         onJoinModeChange = { viewModel.setJoinMode(it) },
                         onTransitionTypeChange = { viewModel.setTransitionType(it) },
                         onTransitionDurationChange = { viewModel.setTransitionDuration(it) },
                         onEndBehaviorChange = { viewModel.setVideoEndBehavior(it) }
                     )
 
+                    EditorTab.SPEED -> SpeedTabPanel(
+                        selectedClip = state.selectedClip,
+                        hasMultipleClips = state.clips.size > 1,
+                        onSpeedChange = { id, spd -> viewModel.setClipSpeed(id, spd) },
+                        onApplyToAll = { spd -> viewModel.applySpeedToAllClips(spd) }
+                    )
+
+                    EditorTab.COLOR -> ColorTabPanel(
+                        colorConfig = state.colorConfig,
+                        onPresetChange = { viewModel.setColorPreset(it) },
+                        onBrightnessChange = { viewModel.setBrightness(it) },
+                        onContrastChange = { viewModel.setContrast(it) },
+                        onSaturationChange = { viewModel.setSaturation(it) },
+                        onReset = { viewModel.resetColorConfig() }
+                    )
+
                     EditorTab.AUDIO -> AudioTabPanel(
                         audioConfig = state.audioConfig,
-                        onSelectAudio = { viewModel.selectAudioTrack(it) },
+                        onSelectAudio = { uri, extracted -> viewModel.selectAudioTrack(uri, extracted) },
                         onRemoveAudio = { viewModel.removeAudioTrack() },
                         onStartOffsetChange = { viewModel.setAudioStartOffset(it) },
                         onToggleMuteOriginal = { viewModel.toggleMuteOriginalAudio() },
@@ -140,9 +178,22 @@ fun EditorScreen(viewModel: EditorViewModel) {
                         onFadeOutChange = { viewModel.setFadeOutDuration(it) }
                     )
 
+                    EditorTab.BEAT -> BeatTabPanel(
+                        currentPositionMs = state.currentPositionMs,
+                        beatMarkersMs = state.audioConfig.beatMarkersMs,
+                        hasClips = state.clips.isNotEmpty(),
+                        onTapBeat = { viewModel.addBeatMarkerAtCurrentPosition() },
+                        onSeekToBeat = { viewModel.seekTo(it) },
+                        onCutAtBeat = { viewModel.cutClipAtBeat(it) },
+                        onRemoveBeat = { viewModel.removeBeatMarker(it) },
+                        onClearBeats = { viewModel.clearBeatMarkers() }
+                    )
+
                     EditorTab.CROP -> CropTabPanel(
                         selectedRatio = state.aspectRatio,
-                        onSelectRatio = { viewModel.setAspectRatio(it) }
+                        selectedScaleMode = state.cropScaleMode,
+                        onSelectRatio = { viewModel.setAspectRatio(it) },
+                        onSelectScaleMode = { viewModel.setCropScaleMode(it) }
                     )
 
                     EditorTab.SUBTITLES -> SubtitlesTabPanel(
@@ -152,16 +203,47 @@ fun EditorScreen(viewModel: EditorViewModel) {
                             editingSubtitle = null
                             showSubtitleDialog = true
                         },
+                        onImportLrcClick = { viewModel.importSubtitlesFromUri(it) },
                         onEditClick = { item ->
                             viewModel.pausePlayback()
                             editingSubtitle = item
                             showSubtitleDialog = true
                         },
-                        onDeleteClick = { viewModel.removeSubtitle(it) }
+                        onDeleteClick = { viewModel.removeSubtitle(it) },
+                        onClearAllClick = { viewModel.clearAllSubtitles() }
+                    )
+
+                    EditorTab.WATERMARK -> WatermarkTabPanel(
+                        config = state.watermarkConfig,
+                        onSelectLogo = { viewModel.selectWatermarkImage(it) },
+                        onRemoveLogo = { viewModel.removeWatermark() },
+                        onScaleChange = { viewModel.setWatermarkScale(it) },
+                        onOpacityChange = { viewModel.setWatermarkOpacity(it) },
+                        onPositionChange = { viewModel.setWatermarkPosition(it) }
                     )
                 }
             }
+
+            HorizontalDivider()
+
+            // Bar Alat Melintang Boleh Skrol di Bahagian Paling Bawah
+            EditorTabBar(
+                activeTab = state.activeTab,
+                onSelectTab = { viewModel.selectTab(it) }
+            )
         }
+    }
+
+    if (showDraftsDialog) {
+        DraftsDialog(
+            currentProjectName = state.projectName,
+            hasClips = state.clips.isNotEmpty(),
+            drafts = drafts,
+            onSaveDraft = { viewModel.saveCurrentDraft(it) },
+            onLoadDraft = { viewModel.loadDraft(it) },
+            onDeleteDraft = { viewModel.deleteDraft(it) },
+            onDismiss = { showDraftsDialog = false }
+        )
     }
 
     if (showSubtitleDialog) {

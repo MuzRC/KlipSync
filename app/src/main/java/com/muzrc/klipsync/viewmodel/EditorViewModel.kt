@@ -9,6 +9,8 @@ import androidx.media3.common.util.UnstableApi
 import com.muzrc.klipsync.media.MediaMetadataReader
 import com.muzrc.klipsync.media.VideoExporter
 import com.muzrc.klipsync.model.AspectRatioPreset
+import com.muzrc.klipsync.model.ColorFilterPreset
+import com.muzrc.klipsync.model.CropScaleMode
 import com.muzrc.klipsync.model.EditorTab
 import com.muzrc.klipsync.model.EditorUiState
 import com.muzrc.klipsync.model.ExportFrameRate
@@ -18,8 +20,14 @@ import com.muzrc.klipsync.model.JoinMode
 import com.muzrc.klipsync.model.SubtitleItem
 import com.muzrc.klipsync.model.TransitionType
 import com.muzrc.klipsync.model.UpdateCheckState
+import com.muzrc.klipsync.model.VideoEndBehavior
+import com.muzrc.klipsync.model.WatermarkPosition
 import com.muzrc.klipsync.preview.PreviewPlayerController
+import com.muzrc.klipsync.util.DraftStorageManager
+import com.muzrc.klipsync.util.SavedDraftSummary
+import com.muzrc.klipsync.util.SubtitleParser
 import com.muzrc.klipsync.util.UpdateChecker
+import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,18 +40,23 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class EditorViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val metadataReader = MediaMetadataReader(application)
-    private val videoExporter = VideoExporter(application)
-    val playerController = PreviewPlayerController(application)
+    private val appContext = application.applicationContext
+    private val metadataReader = MediaMetadataReader(appContext)
+    private val videoExporter = VideoExporter(appContext)
+    val playerController = PreviewPlayerController(appContext)
 
     private val _uiState = MutableStateFlow(EditorUiState())
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
+
+    private val _drafts = MutableStateFlow<List<SavedDraftSummary>>(emptyList())
+    val drafts: StateFlow<List<SavedDraftSummary>> = _drafts.asStateFlow()
 
     private var playbackTickerJob: Job? = null
     private var exportJob: Job? = null
 
     init {
         startPlaybackTicker()
+        refreshDrafts()
     }
 
     private fun startPlaybackTicker() {
@@ -63,7 +76,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                         _uiState.update { it.copy(currentPositionMs = pos) }
                     }
                 }
-                delay(60L)
+                delay(55L)
             }
         }
     }
@@ -80,14 +93,23 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(activeTab = tab) }
     }
 
+    fun selectClip(clipId: String) {
+        _uiState.update { it.copy(selectedClipId = clipId) }
+    }
+
     // --- Pengurusan Klip Video ---
     fun addVideoClips(uris: List<Uri>) {
         if (uris.isEmpty()) return
         pausePlayback()
         viewModelScope.launch {
-            val newClips = uris.map { uri -> metadataReader.readVideoClip(uri) }
+            val newClips = uris.map { uri ->
+                DraftStorageManager.takePersistablePermissionIfPossible(appContext, uri)
+                metadataReader.readVideoClip(uri)
+            }
             _uiState.update { state ->
-                val updated = state.copy(clips = state.clips + newClips)
+                val merged = state.clips + newClips
+                val activeId = state.selectedClipId ?: newClips.firstOrNull()?.id
+                val updated = state.copy(clips = merged, selectedClipId = activeId)
                 syncPreviewWithState(updated)
                 updated
             }
@@ -97,8 +119,15 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun removeClip(clipId: String) {
         pausePlayback()
         _uiState.update { state ->
+            val remaining = state.clips.filterNot { it.id == clipId }
+            val nextSelected = if (state.selectedClipId == clipId) {
+                remaining.firstOrNull()?.id
+            } else {
+                state.selectedClipId
+            }
             val updated = state.copy(
-                clips = state.clips.filterNot { it.id == clipId },
+                clips = remaining,
+                selectedClipId = nextSelected,
                 currentPositionMs = 0L
             )
             syncPreviewWithState(updated)
@@ -153,6 +182,116 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun setClipLoopCount(clipId: String, loopCount: Int) {
+        pausePlayback()
+        _uiState.update { state ->
+            val safeLoop = loopCount.coerceIn(1, 20)
+            val updatedClips = state.clips.map { clip ->
+                if (clip.id == clipId) clip.copy(loopCount = safeLoop) else clip
+            }
+            val updated = state.copy(clips = updatedClips)
+            syncPreviewWithState(updated)
+            updated
+        }
+    }
+
+    fun setClipSpeed(clipId: String, speed: Float) {
+        pausePlayback()
+        _uiState.update { state ->
+            val safeSpeed = speed.coerceIn(0.25f, 3.0f)
+            val updatedClips = state.clips.map { clip ->
+                if (clip.id == clipId) clip.copy(speed = safeSpeed) else clip
+            }
+            val updated = state.copy(clips = updatedClips)
+            syncPreviewWithState(updated)
+            updated
+        }
+    }
+
+    fun applySpeedToAllClips(speed: Float) {
+        pausePlayback()
+        _uiState.update { state ->
+            val safeSpeed = speed.coerceIn(0.25f, 3.0f)
+            val updatedClips = state.clips.map { it.copy(speed = safeSpeed) }
+            val updated = state.copy(clips = updatedClips)
+            syncPreviewWithState(updated)
+            updated
+        }
+    }
+
+    fun rotateClip90(clipId: String) {
+        _uiState.update { state ->
+            val updatedClips = state.clips.map { clip ->
+                if (clip.id == clipId) {
+                    clip.copy(rotationDegrees = (clip.rotationDegrees + 90) % 360)
+                } else {
+                    clip
+                }
+            }
+            state.copy(clips = updatedClips)
+        }
+    }
+
+    fun toggleClipMirror(clipId: String) {
+        _uiState.update { state ->
+            val updatedClips = state.clips.map { clip ->
+                if (clip.id == clipId) clip.copy(isMirrored = !clip.isMirrored) else clip
+            }
+            state.copy(clips = updatedClips)
+        }
+    }
+
+    fun cutClipAtTimelinePosition(clipId: String, timelineTargetMs: Long) {
+        pausePlayback()
+        _uiState.update { state ->
+            val targetIndex = state.clips.indexOfFirst { it.id == clipId }
+            if (targetIndex == -1) return@update state
+
+            var startInTimeline = 0L
+            for (i in 0 until targetIndex) {
+                startInTimeline += state.clips[i].effectiveDurationMs
+            }
+
+            val targetClip = state.clips[targetIndex]
+            val singlePlayedDur = targetClip.singlePlayDurationMs
+            if (singlePlayedDur < 500L) return@update state
+
+            val localPlayedOffset = timelineTargetMs - startInTimeline
+            val safePlayedOffset = if (localPlayedOffset in 250L..(singlePlayedDur - 250L)) {
+                localPlayedOffset
+            } else {
+                singlePlayedDur / 2L
+            }
+
+            val rawOffset = (safePlayedOffset * targetClip.speed).toLong()
+            val splitPointMs = (targetClip.trimStartMs + rawOffset)
+                .coerceIn(targetClip.trimStartMs + 200L, targetClip.trimEndMs - 200L)
+
+            val baseName = targetClip.displayName.substringBeforeLast('.')
+            val partA = targetClip.copy(
+                id = UUID.randomUUID().toString(),
+                displayName = "$baseName (A)",
+                trimEndMs = splitPointMs,
+                loopCount = 1
+            )
+            val partB = targetClip.copy(
+                id = UUID.randomUUID().toString(),
+                displayName = "$baseName (B)",
+                trimStartMs = splitPointMs,
+                loopCount = 1
+            )
+
+            val mutable = state.clips.toMutableList()
+            mutable.removeAt(targetIndex)
+            mutable.add(targetIndex, partB)
+            mutable.add(targetIndex, partA)
+
+            val updated = state.copy(clips = mutable, selectedClipId = partA.id)
+            syncPreviewWithState(updated)
+            updated
+        }
+    }
+
     fun setJoinMode(mode: JoinMode) {
         pausePlayback()
         _uiState.update { state ->
@@ -183,11 +322,61 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Pengurusan Audio ---
-    fun selectAudioTrack(uri: Uri) {
+    fun setVideoEndBehavior(behavior: VideoEndBehavior) {
         pausePlayback()
+        _uiState.update { state ->
+            val updated = state.copy(
+                transitionConfig = state.transitionConfig.copy(endBehavior = behavior)
+            )
+            syncPreviewWithState(updated)
+            updated
+        }
+    }
+
+    // --- Penapis Warna & Pencahayaan ---
+    fun setColorPreset(preset: ColorFilterPreset) {
+        _uiState.update { state ->
+            state.copy(colorConfig = state.colorConfig.copy(preset = preset))
+        }
+    }
+
+    fun setBrightness(value: Float) {
+        _uiState.update { state ->
+            state.copy(colorConfig = state.colorConfig.copy(brightness = value.coerceIn(-0.4f, 0.4f)))
+        }
+    }
+
+    fun setContrast(value: Float) {
+        _uiState.update { state ->
+            state.copy(colorConfig = state.colorConfig.copy(contrast = value.coerceIn(0.6f, 1.5f)))
+        }
+    }
+
+    fun setSaturation(value: Float) {
+        _uiState.update { state ->
+            state.copy(colorConfig = state.colorConfig.copy(saturation = value.coerceIn(0f, 1.8f)))
+        }
+    }
+
+    fun resetColorConfig() {
+        _uiState.update { state ->
+            state.copy(
+                colorConfig = state.colorConfig.copy(
+                    preset = ColorFilterPreset.NONE,
+                    brightness = 0f,
+                    contrast = 1f,
+                    saturation = 1f
+                )
+            )
+        }
+    }
+
+    // --- Pengurusan Audio & Beat Markers ---
+    fun selectAudioTrack(uri: Uri, extractedFromVideo: Boolean = false) {
+        pausePlayback()
+        DraftStorageManager.takePersistablePermissionIfPossible(appContext, uri)
         viewModelScope.launch {
-            val audioTrack = metadataReader.readAudioTrack(uri)
+            val audioTrack = metadataReader.readAudioTrack(uri, extractedFromVideo)
             _uiState.update { state ->
                 val preservedConfig = audioTrack.copy(
                     isOriginalAudioMuted = state.audioConfig.isOriginalAudioMuted,
@@ -211,8 +400,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 audioConfig = state.audioConfig.copy(
                     uri = null,
                     displayName = "",
+                    isExtractedFromVideo = false,
                     totalDurationMs = 0L,
-                    startOffsetMs = 0L
+                    startOffsetMs = 0L,
+                    waveformPeaks = emptyList(),
+                    beatMarkersMs = emptyList()
                 ),
                 currentPositionMs = 0L
             )
@@ -299,12 +491,54 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Crop Nisbah Skrin ---
+    fun addBeatMarkerAtCurrentPosition() {
+        _uiState.update { state ->
+            val pos = state.currentPositionMs
+            val existing = state.audioConfig.beatMarkersMs
+            if (existing.any { kotlin.math.abs(it - pos) < 120L }) return@update state
+            val updatedBeats = (existing + pos).sorted()
+            state.copy(audioConfig = state.audioConfig.copy(beatMarkersMs = updatedBeats))
+        }
+    }
+
+    fun removeBeatMarker(markerMs: Long) {
+        _uiState.update { state ->
+            val updatedBeats = state.audioConfig.beatMarkersMs.filterNot { it == markerMs }
+            state.copy(audioConfig = state.audioConfig.copy(beatMarkersMs = updatedBeats))
+        }
+    }
+
+    fun clearBeatMarkers() {
+        _uiState.update { state ->
+            state.copy(audioConfig = state.audioConfig.copy(beatMarkersMs = emptyList()))
+        }
+    }
+
+    fun cutClipAtBeat(beatMs: Long) {
+        val state = _uiState.value
+        if (state.clips.isEmpty()) return
+
+        var acc = 0L
+        for (clip in state.clips) {
+            val dur = clip.effectiveDurationMs
+            if (beatMs in (acc + 250L)..(acc + dur - 250L)) {
+                cutClipAtTimelinePosition(clip.id, beatMs)
+                return
+            }
+            acc += dur
+        }
+    }
+
+    // --- Crop & Nisbah Skrin ---
     fun setAspectRatio(preset: AspectRatioPreset) {
         _uiState.update { it.copy(aspectRatio = preset) }
     }
 
-    // --- Sarikata Manual ---
+    fun setCropScaleMode(mode: CropScaleMode) {
+        _uiState.update { it.copy(cropScaleMode = mode) }
+    }
+
+    // --- Sarikata & Import Fail Lirik (.LRC / .SRT) ---
     fun upsertSubtitle(item: SubtitleItem) {
         _uiState.update { state ->
             val exists = state.subtitles.any { it.id == item.id }
@@ -320,6 +554,76 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun removeSubtitle(subtitleId: String) {
         _uiState.update { state ->
             state.copy(subtitles = state.subtitles.filterNot { it.id == subtitleId })
+        }
+    }
+
+    fun clearAllSubtitles() {
+        _uiState.update { it.copy(subtitles = emptyList()) }
+    }
+
+    fun importSubtitlesFromUri(uri: Uri) {
+        viewModelScope.launch {
+            val maxDur = _uiState.value.finalTimelineDurationMs.coerceAtLeast(180_000L)
+            val imported = SubtitleParser.parseFromUri(appContext, uri, maxDur)
+            if (imported.isNotEmpty()) {
+                _uiState.update { state ->
+                    val combined = (state.subtitles + imported).sortedBy { it.startMs }
+                    state.copy(subtitles = combined)
+                }
+            }
+        }
+    }
+
+    // --- Logo / Watermark PNG ---
+    fun selectWatermarkImage(uri: Uri) {
+        DraftStorageManager.takePersistablePermissionIfPossible(appContext, uri)
+        val name = metadataReader.resolveDisplayName(uri) ?: "Logo.png"
+        _uiState.update { state ->
+            state.copy(
+                watermarkConfig = state.watermarkConfig.copy(
+                    uri = uri,
+                    displayName = name
+                )
+            )
+        }
+    }
+
+    fun removeWatermark() {
+        _uiState.update { state ->
+            state.copy(
+                watermarkConfig = state.watermarkConfig.copy(
+                    uri = null,
+                    displayName = ""
+                )
+            )
+        }
+    }
+
+    fun setWatermarkScale(scale: Float) {
+        _uiState.update { state ->
+            state.copy(
+                watermarkConfig = state.watermarkConfig.copy(
+                    scalePercent = scale.coerceIn(0.08f, 0.55f)
+                )
+            )
+        }
+    }
+
+    fun setWatermarkOpacity(opacity: Float) {
+        _uiState.update { state ->
+            state.copy(
+                watermarkConfig = state.watermarkConfig.copy(
+                    opacity = opacity.coerceIn(0.15f, 1.0f)
+                )
+            )
+        }
+    }
+
+    fun setWatermarkPosition(position: WatermarkPosition) {
+        _uiState.update { state ->
+            state.copy(
+                watermarkConfig = state.watermarkConfig.copy(position = position)
+            )
         }
     }
 
@@ -346,6 +650,42 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val safePos = positionMs.coerceIn(0L, total)
         playerController.seekTo(safePos)
         _uiState.update { it.copy(currentPositionMs = safePos) }
+    }
+
+    // --- Draf Projek Tempatan ---
+    fun refreshDrafts() {
+        viewModelScope.launch {
+            _drafts.value = DraftStorageManager.listDrafts(appContext)
+        }
+    }
+
+    fun saveCurrentDraft(projectName: String) {
+        pausePlayback()
+        viewModelScope.launch {
+            val snapshot = _uiState.value.copy(projectName = projectName)
+            DraftStorageManager.saveDraft(appContext, snapshot, projectName)
+            _uiState.update { it.copy(projectName = projectName) }
+            refreshDrafts()
+        }
+    }
+
+    fun loadDraft(fileName: String) {
+        pausePlayback()
+        viewModelScope.launch {
+            val loadedState = DraftStorageManager.loadDraft(appContext, fileName)
+            if (loadedState != null) {
+                _uiState.value = loadedState
+                syncPreviewWithState(loadedState)
+                playerController.seekTo(0L)
+            }
+        }
+    }
+
+    fun deleteDraft(fileName: String) {
+        viewModelScope.launch {
+            DraftStorageManager.deleteDraft(appContext, fileName)
+            refreshDrafts()
+        }
     }
 
     // --- Eksport Video ---

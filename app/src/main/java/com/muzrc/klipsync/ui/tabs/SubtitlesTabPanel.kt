@@ -1,5 +1,8 @@
 package com.muzrc.klipsync.ui.tabs
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,13 +15,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,9 +38,19 @@ import com.muzrc.klipsync.util.TimeFormatter
 fun SubtitlesTabPanel(
     subtitles: List<SubtitleItem>,
     onAddNewClick: () -> Unit,
+    onImportLrcClick: (Uri) -> Unit,
     onEditClick: (SubtitleItem) -> Unit,
-    onDeleteClick: (String) -> Unit
+    onDeleteClick: (String) -> Unit,
+    onClearAllClick: () -> Unit
 ) {
+    val lrcPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            onImportLrcClick(uri)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -42,21 +58,52 @@ fun SubtitlesTabPanel(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Button(
-            onClick = onAddNewClick,
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(Icons.Rounded.Add, contentDescription = null)
-            Text(
-                text = "Tambah Sarikata / Lirik Manual",
-                modifier = Modifier.padding(start = 6.dp),
-                fontWeight = FontWeight.SemiBold
-            )
+            Button(
+                onClick = onAddNewClick,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = null)
+                Text(
+                    text = "Taip Manual",
+                    modifier = Modifier.padding(start = 6.dp),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            OutlinedButton(
+                onClick = { lrcPicker.launch(arrayOf("*/*")) },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Rounded.UploadFile, contentDescription = null)
+                Text(
+                    text = "Import .LRC/.SRT",
+                    modifier = Modifier.padding(start = 6.dp)
+                )
+            }
         }
 
-        if (subtitles.isEmpty()) {
+        if (subtitles.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Senarai Lirik / Sarikata (${subtitles.size})",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                TextButton(onClick = onClearAllClick) {
+                    Text("Padam Semua")
+                }
+            }
+        } else {
             Text(
-                text = "Belum ada sarikata. Tekan butang di atas untuk menaip teks lirik atau sarikata mengikut masa.",
+                text = "Belum ada sarikata. Anda boleh menaip secara manual atau mengimport fail lirik .LRC / .SRT dari storan telefon.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 8.dp)
@@ -65,9 +112,7 @@ fun SubtitlesTabPanel(
 
         subtitles.forEach { item ->
             Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Row(
                     modifier = Modifier
