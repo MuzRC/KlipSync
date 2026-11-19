@@ -6,8 +6,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,6 +51,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
 
     var showExportDialog by remember { mutableStateOf(false) }
     var showDraftsDialog by remember { mutableStateOf(false) }
+    var showNewProjectConfirmDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var editingSubtitle by remember { mutableStateOf<SubtitleItem?>(null) }
 
@@ -69,7 +74,19 @@ fun EditorScreen(viewModel: EditorViewModel) {
         topBar = {
             EditorTopBar(
                 hasClips = state.clips.isNotEmpty(),
+                canUndo = state.canUndo,
+                canRedo = state.canRedo,
                 isCheckingUpdate = state.updateCheckState is UpdateCheckState.Checking,
+                onNewProjectClick = {
+                    viewModel.pausePlayback()
+                    if (state.hasAnyContent) {
+                        showNewProjectConfirmDialog = true
+                    } else {
+                        viewModel.createNewProject()
+                    }
+                },
+                onUndoClick = { viewModel.undo() },
+                onRedoClick = { viewModel.redo() },
                 onDraftsClick = {
                     viewModel.pausePlayback()
                     viewModel.refreshDrafts()
@@ -250,11 +267,37 @@ fun EditorScreen(viewModel: EditorViewModel) {
         }
     }
 
+    if (showNewProjectConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewProjectConfirmDialog = false },
+            title = { Text("Buat Projek Baharu?") },
+            text = {
+                Text("Semua klip, lagu dan suntingan yang belum disimpan dalam draf akan dikosongkan.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.createNewProject()
+                        showNewProjectConfirmDialog = false
+                    }
+                ) {
+                    Text("Ya, Projek Baharu")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewProjectConfirmDialog = false }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
     if (showDraftsDialog) {
         DraftsDialog(
             currentProjectName = state.projectName,
             hasClips = state.clips.isNotEmpty(),
             drafts = drafts,
+            onNewProject = { viewModel.createNewProject() },
             onSaveDraft = { viewModel.saveCurrentDraft(it) },
             onLoadDraft = { viewModel.loadDraft(it) },
             onDeleteDraft = { viewModel.deleteDraft(it) },
