@@ -26,7 +26,8 @@ data class VideoClip(
     val height: Int = 1920,
     val isImage: Boolean = false,
     val mimeType: String? = null,
-    val motionEffect: CameraMotionEffect = CameraMotionEffect.NONE
+    val motionEffect: CameraMotionEffect = CameraMotionEffect.NONE,
+    val motionIntensity: Float = 0.20f // Julat 0.05f (5%) hingga 0.50f (50%)
 ) {
     val rawTrimmedDurationMs: Long
         get() = (trimEndMs - trimStartMs).coerceAtLeast(0L)
