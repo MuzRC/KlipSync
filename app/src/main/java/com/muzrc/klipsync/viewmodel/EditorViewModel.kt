@@ -2,6 +2,7 @@ package com.muzrc.klipsync.viewmodel
 
 import android.app.Application
 import android.net.Uri
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -55,6 +56,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _drafts = MutableStateFlow<List<SavedDraftSummary>>(emptyList())
     val drafts: StateFlow<List<SavedDraftSummary>> = _drafts.asStateFlow()
 
+    // Sejarah Undo / Redo (maksimum 25 langkah)
+    private val undoStack = ArrayDeque<EditorUiState>()
+    private val redoStack = ArrayDeque<EditorUiState>()
+    private val maxHistorySteps = 25
+    private var lastContinuousActionKey: String = ""
+    private var lastContinuousActionMs: Long = 0L
+
     private var playbackTickerJob: Job? = null
     private var exportJob: Job? = null
 
@@ -91,6 +99,128 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             transitionConfig = newState.transitionConfig,
             audio = newState.audioConfig
         )
+    }
+
+    private fun cleanSnapshotForHistory(state: EditorUiState): EditorUiState {
+        return state.copy(
+            isPlaying = false,
+            isDetectingBeats = false,
+            exportState = ExportState.Idle,
+            updateCheckState = UpdateCheckState.Idle,
+            canUndo = false,
+            canRedo = false
+        )
+    }
+
+    /**
+     * Mengemas kini keadaan penyuntingan sambil merekodkan langkah ke dalam sejarah Undo/Redo
+     * dan menyelaraskan Live Preview secara automatik.
+     */
+    private fun updateProjectState(
+        continuousKey: String? = null,
+        syncPreview: Boolean = true,
+        seekAfterSyncMs: Long? = null,
+        transform: (EditorUiState) -> EditorUiState
+    ) {
+        _uiState.update { current ->
+            val now = SystemClock.elapsedRealtime()
+            val shouldRecordSnapshot = if (continuousKey != null) {
+                val isSameRecentDrag = (continuousKey == lastContinuousActionKey) &&
+                    ((now - lastContinuousActionMs) < 1100L)
+                lastContinuousActionKey = continuousKey
+                lastContinuousActionMs = now
+                !isSameRecentDrag
+            } else {
+                lastContinuousActionKey = ""
+                lastContinuousActionMs = 0L
+                true
+            }
+
+            if (shouldRecordSnapshot) {
+                undoStack.addLast(cleanSnapshotForHistory(current))
+                while (undoStack.size > maxHistorySteps) {
+                    undoStack.removeFirst()
+                }
+                redoStack.clear()
+            }
+
+            val transformed = transform(current)
+            val clampedPos = (seekAfterSyncMs ?: transformed.currentPositionMs)
+                .coerceIn(0L, transformed.finalTimelineDurationMs)
+
+            val finalState = transformed.copy(
+                currentPositionMs = clampedPos,
+                canUndo = undoStack.isNotEmpty(),
+                canRedo = redoStack.isNotEmpty()
+            )
+
+            if (syncPreview) {
+                syncPreviewWithState(finalState)
+            }
+            if (seekAfterSyncMs != null || clampedPos != current.currentPositionMs) {
+                playerController.seekTo(clampedPos)
+            }
+            finalState
+        }
+    }
+
+    // --- Projek Baharu, Undo & Redo ---
+    fun createNewProject() {
+        pausePlayback()
+        exportJob?.cancel()
+        undoStack.clear()
+        redoStack.clear()
+        lastContinuousActionKey = ""
+        lastContinuousActionMs = 0L
+
+        val freshState = EditorUiState()
+        _uiState.value = freshState
+        syncPreviewWithState(freshState)
+        playerController.seekTo(0L)
+    }
+
+    fun undo() {
+        if (undoStack.isEmpty()) return
+        pausePlayback()
+        lastContinuousActionKey = ""
+
+        val current = _uiState.value
+        redoStack.addLast(cleanSnapshotForHistory(current))
+
+        val previous = undoStack.removeLast()
+        val safePos = previous.currentPositionMs.coerceIn(0L, previous.finalTimelineDurationMs)
+        val restored = previous.copy(
+            isPlaying = false,
+            currentPositionMs = safePos,
+            canUndo = undoStack.isNotEmpty(),
+            canRedo = redoStack.isNotEmpty()
+        )
+
+        _uiState.value = restored
+        syncPreviewWithState(restored)
+        playerController.seekTo(safePos)
+    }
+
+    fun redo() {
+        if (redoStack.isEmpty()) return
+        pausePlayback()
+        lastContinuousActionKey = ""
+
+        val current = _uiState.value
+        undoStack.addLast(cleanSnapshotForHistory(current))
+
+        val next = redoStack.removeLast()
+        val safePos = next.currentPositionMs.coerceIn(0L, next.finalTimelineDurationMs)
+        val restored = next.copy(
+            isPlaying = false,
+            currentPositionMs = safePos,
+            canUndo = undoStack.isNotEmpty(),
+            canRedo = redoStack.isNotEmpty()
+        )
+
+        _uiState.value = restored
+        syncPreviewWithState(restored)
+        playerController.seekTo(safePos)
     }
 
     fun selectTab(tab: EditorTab) {
@@ -139,46 +269,39 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 DraftStorageManager.takePersistablePermissionIfPossible(appContext, uri)
                 metadataReader.readMediaClip(uri)
             }
-            _uiState.update { state ->
+            updateProjectState(syncPreview = true) { state ->
                 val merged = state.clips + newClips
                 val activeId = state.selectedClipId ?: newClips.firstOrNull()?.id
-                val updated = state.copy(clips = merged, selectedClipId = activeId)
-                syncPreviewWithState(updated)
-                updated
+                state.copy(clips = merged, selectedClipId = activeId)
             }
         }
     }
 
     fun removeClip(clipId: String) {
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true, seekAfterSyncMs = 0L) { state ->
             val remaining = state.clips.filterNot { it.id == clipId }
             val nextSelected = if (state.selectedClipId == clipId) {
                 remaining.firstOrNull()?.id
             } else {
                 state.selectedClipId
             }
-            val updated = state.copy(
+            state.copy(
                 clips = remaining,
                 selectedClipId = nextSelected,
                 currentPositionMs = 0L
             )
-            syncPreviewWithState(updated)
-            playerController.seekTo(0L)
-            updated
         }
     }
 
     fun moveClipUp(index: Int) {
         if (index <= 0) return
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val mutable = state.clips.toMutableList()
             val item = mutable.removeAt(index)
             mutable.add(index - 1, item)
-            val updated = state.copy(clips = mutable)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = mutable)
         }
     }
 
@@ -186,19 +309,21 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val currentClips = _uiState.value.clips
         if (index < 0 || index >= currentClips.lastIndex) return
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val mutable = state.clips.toMutableList()
             val item = mutable.removeAt(index)
             mutable.add(index + 1, item)
-            val updated = state.copy(clips = mutable)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = mutable)
         }
     }
 
     fun updateClipTrim(clipId: String, startMs: Long, endMs: Long) {
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(
+            continuousKey = "trim_$clipId",
+            syncPreview = true,
+            seekAfterSyncMs = 0L
+        ) { state ->
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId) {
                     val safeStart = startMs.coerceIn(0L, clip.originalDurationMs)
@@ -208,16 +333,16 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     clip
                 }
             }
-            val updated = state.copy(clips = updatedClips, currentPositionMs = 0L)
-            syncPreviewWithState(updated)
-            playerController.seekTo(0L)
-            updated
+            state.copy(clips = updatedClips, currentPositionMs = 0L)
         }
     }
 
     fun updateImageDuration(clipId: String, durationMs: Long) {
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(
+            continuousKey = "img_dur_$clipId",
+            syncPreview = true
+        ) { state ->
             val safeDur = durationMs.coerceIn(1000L, 60000L)
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId && clip.isImage) {
@@ -230,15 +355,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     clip
                 }
             }
-            val updated = state.copy(clips = updatedClips)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = updatedClips)
         }
     }
 
     fun setClipLoopCount(clipId: String, loopCount: Int) {
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val safeLoop = loopCount.coerceIn(1, 20)
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId) clip.copy(loopCount = safeLoop) else clip
@@ -248,75 +371,69 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 state.transitionConfig
             }
-            val updated = state.copy(clips = updatedClips, transitionConfig = nextTransition)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = updatedClips, transitionConfig = nextTransition)
         }
     }
 
     fun setClipMotionEffect(clipId: String, effect: CameraMotionEffect) {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId) clip.copy(motionEffect = effect) else clip
             }
-            val updated = state.copy(clips = updatedClips)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = updatedClips)
         }
     }
 
     fun setClipMotionIntensity(clipId: String, intensity: Float) {
-        _uiState.update { state ->
+        updateProjectState(
+            continuousKey = "motion_int_$clipId",
+            syncPreview = true
+        ) { state ->
             val safeVal = intensity.coerceIn(0.05f, 0.50f)
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId) clip.copy(motionIntensity = safeVal) else clip
             }
-            val updated = state.copy(clips = updatedClips)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = updatedClips)
         }
     }
 
     fun applyMotionEffectToAllClips(effect: CameraMotionEffect, intensity: Float) {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val safeVal = intensity.coerceIn(0.05f, 0.50f)
             val updatedClips = state.clips.map {
                 it.copy(motionEffect = effect, motionIntensity = safeVal)
             }
-            val updated = state.copy(clips = updatedClips)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = updatedClips)
         }
     }
 
     fun setClipSpeed(clipId: String, speed: Float) {
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(
+            continuousKey = "speed_$clipId",
+            syncPreview = true
+        ) { state ->
             val safeSpeed = speed.coerceIn(0.25f, 3.0f)
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId && !clip.isImage) clip.copy(speed = safeSpeed) else clip
             }
-            val updated = state.copy(clips = updatedClips)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = updatedClips)
         }
     }
 
     fun applySpeedToAllClips(speed: Float) {
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val safeSpeed = speed.coerceIn(0.25f, 3.0f)
             val updatedClips = state.clips.map {
                 if (!it.isImage) it.copy(speed = safeSpeed) else it
             }
-            val updated = state.copy(clips = updatedClips)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = updatedClips)
         }
     }
 
     fun rotateClip90(clipId: String) {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId) {
                     clip.copy(rotationDegrees = (clip.rotationDegrees + 90) % 360)
@@ -324,28 +441,24 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     clip
                 }
             }
-            val updated = state.copy(clips = updatedClips)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = updatedClips)
         }
     }
 
     fun toggleClipMirror(clipId: String) {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId) clip.copy(isMirrored = !clip.isMirrored) else clip
             }
-            val updated = state.copy(clips = updatedClips)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = updatedClips)
         }
     }
 
     fun cutClipAtTimelinePosition(clipId: String, timelineTargetMs: Long) {
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val targetIndex = state.clips.indexOfFirst { it.id == clipId }
-            if (targetIndex == -1) return@update state
+            if (targetIndex == -1) return@updateProjectState state
 
             var startInTimeline = 0L
             for (i in 0 until targetIndex) {
@@ -354,7 +467,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
             val targetClip = state.clips[targetIndex]
             val singlePlayedDur = targetClip.singlePlayDurationMs
-            if (singlePlayedDur < 500L) return@update state
+            if (singlePlayedDur < 500L) return@updateProjectState state
 
             val localPlayedOffset = timelineTargetMs - startInTimeline
             val safePlayedOffset = if (localPlayedOffset in 250L..(singlePlayedDur - 250L)) {
@@ -410,25 +523,21 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             mutable.add(targetIndex, partB)
             mutable.add(targetIndex, partA)
 
-            val updated = state.copy(clips = mutable, selectedClipId = partA.id)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(clips = mutable, selectedClipId = partA.id)
         }
     }
 
     fun setJoinMode(mode: JoinMode) {
         pausePlayback()
-        _uiState.update { state ->
-            val updated = state.copy(
+        updateProjectState(syncPreview = true) { state ->
+            state.copy(
                 transitionConfig = state.transitionConfig.copy(joinMode = mode)
             )
-            syncPreviewWithState(updated)
-            updated
         }
     }
 
     fun setTransitionType(type: TransitionType) {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = false) { state ->
             state.copy(
                 transitionConfig = state.transitionConfig.copy(transitionType = type)
             )
@@ -437,18 +546,19 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setTransitionDuration(durationMs: Long) {
         pausePlayback()
-        _uiState.update { state ->
-            val updated = state.copy(
+        updateProjectState(
+            continuousKey = "trans_dur",
+            syncPreview = true
+        ) { state ->
+            state.copy(
                 transitionConfig = state.transitionConfig.copy(durationMs = durationMs)
             )
-            syncPreviewWithState(updated)
-            updated
         }
     }
 
     fun setVideoEndBehavior(behavior: VideoEndBehavior) {
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val nextTransition = if (
                 behavior == VideoEndBehavior.LOOP_TO_AUDIO &&
                 state.transitionConfig.transitionType == TransitionType.NONE
@@ -460,39 +570,37 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 state.transitionConfig.copy(endBehavior = behavior)
             }
-            val updated = state.copy(transitionConfig = nextTransition)
-            syncPreviewWithState(updated)
-            updated
+            state.copy(transitionConfig = nextTransition)
         }
     }
 
     // --- Penapis Warna & Pencahayaan ---
     fun setColorPreset(preset: ColorFilterPreset) {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = false) { state ->
             state.copy(colorConfig = state.colorConfig.copy(preset = preset))
         }
     }
 
     fun setBrightness(value: Float) {
-        _uiState.update { state ->
+        updateProjectState(continuousKey = "brightness", syncPreview = false) { state ->
             state.copy(colorConfig = state.colorConfig.copy(brightness = value.coerceIn(-0.4f, 0.4f)))
         }
     }
 
     fun setContrast(value: Float) {
-        _uiState.update { state ->
+        updateProjectState(continuousKey = "contrast", syncPreview = false) { state ->
             state.copy(colorConfig = state.colorConfig.copy(contrast = value.coerceIn(0.6f, 1.5f)))
         }
     }
 
     fun setSaturation(value: Float) {
-        _uiState.update { state ->
+        updateProjectState(continuousKey = "saturation", syncPreview = false) { state ->
             state.copy(colorConfig = state.colorConfig.copy(saturation = value.coerceIn(0f, 1.8f)))
         }
     }
 
     fun resetColorConfig() {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = false) { state ->
             state.copy(
                 colorConfig = state.colorConfig.copy(
                     preset = ColorFilterPreset.NONE,
@@ -510,7 +618,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         DraftStorageManager.takePersistablePermissionIfPossible(appContext, uri)
         viewModelScope.launch {
             val audioTrack = metadataReader.readAudioTrack(uri, extractedFromVideo)
-            _uiState.update { state ->
+            updateProjectState(syncPreview = true, seekAfterSyncMs = 0L) { state ->
                 val preservedConfig = audioTrack.copy(
                     isOriginalAudioMuted = state.audioConfig.isOriginalAudioMuted,
                     originalVideoVolume = state.audioConfig.originalVideoVolume,
@@ -518,18 +626,15 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     fadeInDurationMs = state.audioConfig.fadeInDurationMs,
                     fadeOutDurationMs = state.audioConfig.fadeOutDurationMs
                 )
-                val updated = state.copy(audioConfig = preservedConfig, currentPositionMs = 0L)
-                syncPreviewWithState(updated)
-                playerController.seekTo(0L)
-                updated
+                state.copy(audioConfig = preservedConfig, currentPositionMs = 0L)
             }
         }
     }
 
     fun removeAudioTrack() {
         pausePlayback()
-        _uiState.update { state ->
-            val updated = state.copy(
+        updateProjectState(syncPreview = true, seekAfterSyncMs = 0L) { state ->
+            state.copy(
                 audioConfig = state.audioConfig.copy(
                     uri = null,
                     displayName = "",
@@ -541,86 +646,74 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 ),
                 currentPositionMs = 0L
             )
-            syncPreviewWithState(updated)
-            playerController.seekTo(0L)
-            updated
         }
     }
 
     fun setAudioStartOffset(offsetMs: Long) {
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(
+            continuousKey = "audio_offset",
+            syncPreview = true,
+            seekAfterSyncMs = 0L
+        ) { state ->
             val maxOffset = (state.audioConfig.totalDurationMs - 500L).coerceAtLeast(0L)
             val safeOffset = offsetMs.coerceIn(0L, maxOffset)
-            val updated = state.copy(
+            state.copy(
                 audioConfig = state.audioConfig.copy(startOffsetMs = safeOffset),
                 currentPositionMs = 0L
             )
-            syncPreviewWithState(updated)
-            playerController.seekTo(0L)
-            updated
         }
     }
 
     fun toggleMuteOriginalAudio() {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true) { state ->
             val nextMute = !state.audioConfig.isOriginalAudioMuted
             val nextVol = if (nextMute) 0f else {
                 if (state.audioConfig.originalVideoVolume <= 0.01f) 0.5f
                 else state.audioConfig.originalVideoVolume
             }
-            val updated = state.copy(
+            state.copy(
                 audioConfig = state.audioConfig.copy(
                     isOriginalAudioMuted = nextMute,
                     originalVideoVolume = nextVol
                 )
             )
-            syncPreviewWithState(updated)
-            updated
         }
     }
 
     fun setOriginalVideoVolume(volume: Float) {
-        _uiState.update { state ->
+        updateProjectState(continuousKey = "orig_vol", syncPreview = true) { state ->
             val clamped = volume.coerceIn(0f, 1f)
-            val updated = state.copy(
+            state.copy(
                 audioConfig = state.audioConfig.copy(
                     isOriginalAudioMuted = clamped <= 0.01f,
                     originalVideoVolume = clamped
                 )
             )
-            syncPreviewWithState(updated)
-            updated
         }
     }
 
     fun setMusicVolume(volume: Float) {
-        _uiState.update { state ->
-            val updated = state.copy(
+        updateProjectState(continuousKey = "music_vol", syncPreview = true) { state ->
+            state.copy(
                 audioConfig = state.audioConfig.copy(musicVolume = volume.coerceIn(0f, 1f))
             )
-            syncPreviewWithState(updated)
-            updated
         }
     }
 
     fun setFadeInDuration(fadeInMs: Long) {
-        _uiState.update { state ->
-            val updated = state.copy(
+        updateProjectState(syncPreview = true) { state ->
+            state.copy(
                 audioConfig = state.audioConfig.copy(fadeInDurationMs = fadeInMs)
             )
-            syncPreviewWithState(updated)
-            updated
         }
     }
 
     fun setFadeOutDuration(fadeOutMs: Long) {
-        _uiState.update { state ->
-            val updated = state.copy(
+        updateProjectState(syncPreview = true) { state ->
+            state.copy(
                 audioConfig = state.audioConfig.copy(fadeOutDurationMs = fadeOutMs)
             )
-            syncPreviewWithState(updated)
-            updated
         }
     }
 
@@ -638,7 +731,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 startOffsetMs = currentState.audioConfig.startOffsetMs,
                 sensitivity = sensitivity
             )
-            _uiState.update { state ->
+            updateProjectState(syncPreview = false) { state ->
                 state.copy(
                     isDetectingBeats = false,
                     audioConfig = state.audioConfig.copy(beatMarkersMs = detected)
@@ -649,12 +742,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun autoSyncClipsToBeats(repeatClipsToFillAllBeats: Boolean) {
         pausePlayback()
-        _uiState.update { state ->
+        updateProjectState(syncPreview = true, seekAfterSyncMs = 0L) { state ->
             val clips = state.clips
             val beats = state.audioConfig.beatMarkersMs.filter { it >= 250L }.sorted()
-            if (clips.isEmpty() || beats.isEmpty()) return@update state
+            if (clips.isEmpty() || beats.isEmpty()) return@updateProjectState state
 
-            // Bina senarai sela durasi antara setiap beat
             val intervalsMs = mutableListOf<Long>()
             var prevBeat = 0L
             for (beat in beats) {
@@ -701,41 +793,38 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 syncedClips.add(adjustedClip)
             }
 
-            // Kekalkan baki klip yang tidak terlibat jika mod bukan repeat
             if (!repeatClipsToFillAllBeats && clips.size > targetCount) {
                 syncedClips.addAll(clips.subList(targetCount, clips.size))
             }
 
-            val updated = state.copy(
+            state.copy(
                 clips = syncedClips,
                 selectedClipId = syncedClips.firstOrNull()?.id,
                 currentPositionMs = 0L
             )
-            syncPreviewWithState(updated)
-            playerController.seekTo(0L)
-            updated
         }
     }
 
     fun addBeatMarkerAtCurrentPosition() {
-        _uiState.update { state ->
-            val pos = state.currentPositionMs
-            val existing = state.audioConfig.beatMarkersMs
-            if (existing.any { kotlin.math.abs(it - pos) < 120L }) return@update state
-            val updatedBeats = (existing + pos).sorted()
+        val pos = _uiState.value.currentPositionMs
+        val existing = _uiState.value.audioConfig.beatMarkersMs
+        if (existing.any { kotlin.math.abs(it - pos) < 120L }) return
+
+        updateProjectState(syncPreview = false) { state ->
+            val updatedBeats = (state.audioConfig.beatMarkersMs + pos).sorted()
             state.copy(audioConfig = state.audioConfig.copy(beatMarkersMs = updatedBeats))
         }
     }
 
     fun removeBeatMarker(markerMs: Long) {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = false) { state ->
             val updatedBeats = state.audioConfig.beatMarkersMs.filterNot { it == markerMs }
             state.copy(audioConfig = state.audioConfig.copy(beatMarkersMs = updatedBeats))
         }
     }
 
     fun clearBeatMarkers() {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = false) { state ->
             state.copy(audioConfig = state.audioConfig.copy(beatMarkersMs = emptyList()))
         }
     }
@@ -757,16 +846,16 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     // --- Crop & Nisbah Skrin ---
     fun setAspectRatio(preset: AspectRatioPreset) {
-        _uiState.update { it.copy(aspectRatio = preset) }
+        updateProjectState(syncPreview = false) { it.copy(aspectRatio = preset) }
     }
 
     fun setCropScaleMode(mode: CropScaleMode) {
-        _uiState.update { it.copy(cropScaleMode = mode) }
+        updateProjectState(syncPreview = false) { it.copy(cropScaleMode = mode) }
     }
 
     // --- Sarikata & Import Fail Lirik (.LRC / .SRT) ---
     fun upsertSubtitle(item: SubtitleItem) {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = false) { state ->
             val exists = state.subtitles.any { it.id == item.id }
             val updatedList = if (exists) {
                 state.subtitles.map { if (it.id == item.id) item else it }
@@ -778,13 +867,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun removeSubtitle(subtitleId: String) {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = false) { state ->
             state.copy(subtitles = state.subtitles.filterNot { it.id == subtitleId })
         }
     }
 
     fun clearAllSubtitles() {
-        _uiState.update { it.copy(subtitles = emptyList()) }
+        updateProjectState(syncPreview = false) { it.copy(subtitles = emptyList()) }
     }
 
     fun importSubtitlesFromUri(uri: Uri) {
@@ -792,7 +881,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             val maxDur = _uiState.value.finalTimelineDurationMs.coerceAtLeast(180_000L)
             val imported = SubtitleParser.parseFromUri(appContext, uri, maxDur)
             if (imported.isNotEmpty()) {
-                _uiState.update { state ->
+                updateProjectState(syncPreview = false) { state ->
                     val combined = (state.subtitles + imported).sortedBy { it.startMs }
                     state.copy(subtitles = combined)
                 }
@@ -804,7 +893,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun selectWatermarkImage(uri: Uri) {
         DraftStorageManager.takePersistablePermissionIfPossible(appContext, uri)
         val name = metadataReader.resolveDisplayName(uri) ?: "Logo.png"
-        _uiState.update { state ->
+        updateProjectState(syncPreview = false) { state ->
             state.copy(
                 watermarkConfig = state.watermarkConfig.copy(
                     uri = uri,
@@ -815,7 +904,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun removeWatermark() {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = false) { state ->
             state.copy(
                 watermarkConfig = state.watermarkConfig.copy(
                     uri = null,
@@ -826,7 +915,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setWatermarkScale(scale: Float) {
-        _uiState.update { state ->
+        updateProjectState(continuousKey = "wm_scale", syncPreview = false) { state ->
             state.copy(
                 watermarkConfig = state.watermarkConfig.copy(
                     scalePercent = scale.coerceIn(0.08f, 0.55f)
@@ -836,7 +925,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setWatermarkOpacity(opacity: Float) {
-        _uiState.update { state ->
+        updateProjectState(continuousKey = "wm_opacity", syncPreview = false) { state ->
             state.copy(
                 watermarkConfig = state.watermarkConfig.copy(
                     opacity = opacity.coerceIn(0.15f, 1.0f)
@@ -846,7 +935,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setWatermarkPosition(position: WatermarkPosition) {
-        _uiState.update { state ->
+        updateProjectState(syncPreview = false) { state ->
             state.copy(
                 watermarkConfig = state.watermarkConfig.copy(position = position)
             )
@@ -900,8 +989,16 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val loadedState = DraftStorageManager.loadDraft(appContext, fileName)
             if (loadedState != null) {
-                _uiState.value = loadedState
-                syncPreviewWithState(loadedState)
+                undoStack.clear()
+                redoStack.clear()
+                lastContinuousActionKey = ""
+                val cleanLoaded = loadedState.copy(
+                    canUndo = false,
+                    canRedo = false,
+                    currentPositionMs = 0L
+                )
+                _uiState.value = cleanLoaded
+                syncPreviewWithState(cleanLoaded)
                 playerController.seekTo(0L)
             }
         }
