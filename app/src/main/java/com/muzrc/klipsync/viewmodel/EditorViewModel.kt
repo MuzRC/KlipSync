@@ -98,7 +98,36 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectClip(clipId: String) {
-        _uiState.update { it.copy(selectedClipId = clipId) }
+        val state = _uiState.value
+        val targetIndex = state.clips.indexOfFirst { it.id == clipId }
+        if (targetIndex == -1) {
+            _uiState.update { it.copy(selectedClipId = clipId) }
+            return
+        }
+
+        var targetStartMs = 0L
+        val overlapPerJoin = if (state.transitionConfig.joinMode == JoinMode.OVERLAP) {
+            state.transitionConfig.durationMs.coerceAtLeast(0L)
+        } else {
+            0L
+        }
+
+        for (i in 0 until targetIndex) {
+            targetStartMs += state.clips[i].effectiveDurationMs
+            if (overlapPerJoin > 0L) {
+                targetStartMs = (targetStartMs - overlapPerJoin).coerceAtLeast(0L)
+            }
+        }
+
+        pausePlayback()
+        val safePos = targetStartMs.coerceIn(0L, state.finalTimelineDurationMs)
+        playerController.seekTo(safePos)
+        _uiState.update {
+            it.copy(
+                selectedClipId = clipId,
+                currentPositionMs = safePos
+            )
+        }
     }
 
     // --- Pengurusan Klip Video & Gambar ---
