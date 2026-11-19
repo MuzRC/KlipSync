@@ -1026,18 +1026,30 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun startExport() {
         pausePlayback()
+        // Bebaskan decoder perkakasan ExoPlayer sementara supaya Transformer mendapat akses penuh
+        playerController.videoPlayer.stop()
+        playerController.audioPlayer.stop()
+
         exportJob?.cancel()
         val snapshot = _uiState.value
         exportJob = viewModelScope.launch {
             videoExporter.exportProject(snapshot).collect { exportState ->
                 _uiState.update { it.copy(exportState = exportState) }
+                if (exportState is ExportState.Success || exportState is ExportState.Error) {
+                    val cur = _uiState.value
+                    syncPreviewWithState(cur)
+                    playerController.seekTo(cur.currentPositionMs)
+                }
             }
         }
     }
 
     fun cancelOrResetExport() {
         exportJob?.cancel()
+        val cur = _uiState.value
         _uiState.update { it.copy(exportState = ExportState.Idle) }
+        syncPreviewWithState(cur)
+        playerController.seekTo(cur.currentPositionMs)
     }
 
     // --- Semak Kemas Kini Manual ---
