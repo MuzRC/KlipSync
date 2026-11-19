@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.NoteAdd
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -42,6 +43,7 @@ fun DraftsDialog(
     currentProjectName: String,
     hasClips: Boolean,
     drafts: List<SavedDraftSummary>,
+    onNewProject: () -> Unit,
     onSaveDraft: (String) -> Unit,
     onLoadDraft: (String) -> Unit,
     onDeleteDraft: (String) -> Unit,
@@ -52,15 +54,28 @@ fun DraftsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Draf Projek Tempatan") },
+        title = { Text("Pengurusan Projek & Draf") },
         text = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 420.dp)
+                    .heightIn(max = 440.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                OutlinedButton(
+                    onClick = {
+                        onNewProject()
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Rounded.NoteAdd, contentDescription = null)
+                    Text("Buat Projek Baharu (Kosongkan)", modifier = Modifier.padding(start = 6.dp))
+                }
+
+                HorizontalDivider()
+
                 OutlinedTextField(
                     value = nameInput,
                     onValueChange = { nameInput = it },
