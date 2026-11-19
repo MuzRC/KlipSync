@@ -25,6 +25,8 @@ data class EditorUiState(
     val activeTab: EditorTab = EditorTab.CLIPS,
     val isPlaying: Boolean = false,
     val isDetectingBeats: Boolean = false,
+    val canUndo: Boolean = false,
+    val canRedo: Boolean = false,
     val currentPositionMs: Long = 0L,
     val exportConfig: ExportConfig = ExportConfig(),
     val exportState: ExportState = ExportState.Idle,
@@ -33,6 +35,9 @@ data class EditorUiState(
 ) {
     val selectedClip: VideoClip?
         get() = clips.find { it.id == selectedClipId } ?: clips.firstOrNull()
+
+    val hasAnyContent: Boolean
+        get() = clips.isNotEmpty() || audioConfig.uri != null || subtitles.isNotEmpty() || watermarkConfig.uri != null
 
     val expandedClipCount: Int
         get() = clips.sumOf { it.loopCount.coerceAtLeast(1) }
