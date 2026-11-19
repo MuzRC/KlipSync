@@ -4,6 +4,7 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Scaffold
@@ -63,6 +64,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .navigationBarsPadding()
         ) {
             // Zon 1: Pemain Pratonton Langsung
             LivePreviewCanvas(
@@ -74,7 +76,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
                 isInFreezeFrameZone = isInFreezeFrameZone,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(0.42f)
+                    .weight(0.36f)
             )
 
             PlaybackControlBar(
@@ -92,7 +94,8 @@ fun EditorScreen(viewModel: EditorViewModel) {
                 clips = state.clips,
                 audioConfig = state.audioConfig,
                 subtitles = state.subtitles,
-                freezeFrameExtensionMs = state.freezeFrameExtensionMs
+                freezeFrameExtensionMs = state.freezeFrameExtensionMs,
+                autoLoopExtensionMs = state.autoLoopExtensionMs
             )
 
             HorizontalDivider()
@@ -106,20 +109,24 @@ fun EditorScreen(viewModel: EditorViewModel) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(0.58f)
+                    .weight(0.64f)
             ) {
                 when (state.activeTab) {
                     EditorTab.CLIPS -> ClipsTabPanel(
                         clips = state.clips,
                         transitionConfig = state.transitionConfig,
+                        hasLongerAudio = state.extraAudioExtensionMs > 0L,
                         onAddClips = { viewModel.addVideoClips(it) },
                         onRemoveClip = { viewModel.removeClip(it) },
                         onMoveUp = { viewModel.moveClipUp(it) },
                         onMoveDown = { viewModel.moveClipDown(it) },
                         onTrimClip = { id, s, e -> viewModel.updateClipTrim(id, s, e) },
+                        onCutClip = { viewModel.cutClipAtCurrentPosition(it) },
+                        onLoopCountChange = { id, count -> viewModel.setClipLoopCount(id, count) },
                         onJoinModeChange = { viewModel.setJoinMode(it) },
                         onTransitionTypeChange = { viewModel.setTransitionType(it) },
-                        onTransitionDurationChange = { viewModel.setTransitionDuration(it) }
+                        onTransitionDurationChange = { viewModel.setTransitionDuration(it) },
+                        onEndBehaviorChange = { viewModel.setVideoEndBehavior(it) }
                     )
 
                     EditorTab.AUDIO -> AudioTabPanel(
