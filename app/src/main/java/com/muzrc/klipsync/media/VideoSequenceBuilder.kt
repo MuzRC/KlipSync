@@ -155,6 +155,7 @@ class VideoSequenceBuilder(private val context: Context) {
                 clipVideoEffects.add(
                     createCameraMotionEffect(
                         effect = clip.motionEffect,
+                        intensity = clip.motionIntensity,
                         totalDurationUs = finalPlayedDurationMs * 1000L
                     )
                 )
@@ -332,8 +333,10 @@ class VideoSequenceBuilder(private val context: Context) {
 
     private fun createCameraMotionEffect(
         effect: CameraMotionEffect,
+        intensity: Float,
         totalDurationUs: Long
     ): MatrixTransformation {
+        val safeIntensity = intensity.coerceIn(0.05f, 0.50f)
         return MatrixTransformation { presentationTimeUs ->
             val matrix = Matrix()
             val progress = if (totalDurationUs > 0L) {
@@ -344,21 +347,25 @@ class VideoSequenceBuilder(private val context: Context) {
             when (effect) {
                 CameraMotionEffect.NONE -> Unit
                 CameraMotionEffect.ZOOM_IN -> {
-                    val scale = 1.0f + (0.22f * progress)
+                    val scale = 1.0f + (safeIntensity * progress)
                     matrix.postScale(scale, scale)
                 }
                 CameraMotionEffect.ZOOM_OUT -> {
-                    val scale = 1.22f - (0.22f * progress)
+                    val scale = (1.0f + safeIntensity) - (safeIntensity * progress)
                     matrix.postScale(scale, scale)
                 }
                 CameraMotionEffect.PAN_LEFT -> {
-                    matrix.postScale(1.18f, 1.18f)
-                    val translateX = 0.14f - (0.28f * progress)
+                    val baseZoom = 1.0f + safeIntensity
+                    matrix.postScale(baseZoom, baseZoom)
+                    val maxTranslate = safeIntensity * 0.80f
+                    val translateX = maxTranslate - (2f * maxTranslate * progress)
                     matrix.postTranslate(translateX, 0f)
                 }
                 CameraMotionEffect.PAN_RIGHT -> {
-                    matrix.postScale(1.18f, 1.18f)
-                    val translateX = -0.14f + (0.28f * progress)
+                    val baseZoom = 1.0f + safeIntensity
+                    matrix.postScale(baseZoom, baseZoom)
+                    val maxTranslate = safeIntensity * 0.80f
+                    val translateX = -maxTranslate + (2f * maxTranslate * progress)
                     matrix.postTranslate(translateX, 0f)
                 }
             }
