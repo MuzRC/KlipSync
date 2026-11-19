@@ -21,10 +21,19 @@ object WatermarkOverlayBuilder {
     fun buildWatermarkEffect(context: Context, config: WatermarkConfig): Effect? {
         val uri = config.uri ?: return null
         val sourceBitmap = try {
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream)
+                BitmapFactory.decodeStream(stream, null, boundsOpts)
             }
-        } catch (_: Exception) {
+            var sample = 1
+            while ((boundsOpts.outWidth / sample) > 512 || (boundsOpts.outHeight / sample) > 512) {
+                sample *= 2
+            }
+            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, decodeOpts)
+            }
+        } catch (_: Throwable) {
             null
         } ?: return null
 
