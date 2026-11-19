@@ -126,6 +126,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
                 subtitles = state.subtitles,
                 freezeFrameExtensionMs = state.freezeFrameExtensionMs,
                 autoLoopExtensionMs = state.autoLoopExtensionMs,
+                currentPositionMs = state.currentPositionMs,
                 onSelectClip = { viewModel.selectClip(it) }
             )
 
@@ -193,6 +194,10 @@ fun EditorScreen(viewModel: EditorViewModel) {
                         currentPositionMs = state.currentPositionMs,
                         beatMarkersMs = state.audioConfig.beatMarkersMs,
                         hasClips = state.clips.isNotEmpty(),
+                        hasAudio = state.audioConfig.uri != null,
+                        isDetectingBeats = state.isDetectingBeats,
+                        onAutoDetectBeats = { viewModel.autoDetectBeats(it) },
+                        onAutoSyncClipsToBeats = { repeat -> viewModel.autoSyncClipsToBeats(repeat) },
                         onTapBeat = { viewModel.addBeatMarkerAtCurrentPosition() },
                         onSeekToBeat = { viewModel.seekTo(it) },
                         onCutAtBeat = { viewModel.cutClipAtBeat(it) },

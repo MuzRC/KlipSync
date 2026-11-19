@@ -24,6 +24,7 @@ data class EditorUiState(
     val watermarkConfig: WatermarkConfig = WatermarkConfig(),
     val activeTab: EditorTab = EditorTab.CLIPS,
     val isPlaying: Boolean = false,
+    val isDetectingBeats: Boolean = false,
     val currentPositionMs: Long = 0L,
     val exportConfig: ExportConfig = ExportConfig(),
     val exportState: ExportState = ExportState.Idle,

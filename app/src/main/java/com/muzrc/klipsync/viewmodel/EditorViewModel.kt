@@ -6,6 +6,8 @@ import androidx.annotation.OptIn
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
+import com.muzrc.klipsync.media.BeatDetector
+import com.muzrc.klipsync.media.BeatSensitivity
 import com.muzrc.klipsync.media.MediaMetadataReader
 import com.muzrc.klipsync.media.VideoExporter
 import com.muzrc.klipsync.model.AspectRatioPreset
@@ -21,6 +23,7 @@ import com.muzrc.klipsync.model.JoinMode
 import com.muzrc.klipsync.model.SubtitleItem
 import com.muzrc.klipsync.model.TransitionType
 import com.muzrc.klipsync.model.UpdateCheckState
+import com.muzrc.klipsync.model.VideoClip
 import com.muzrc.klipsync.model.VideoEndBehavior
 import com.muzrc.klipsync.model.WatermarkPosition
 import com.muzrc.klipsync.preview.PreviewPlayerController
@@ -309,8 +312,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             val baseName = targetClip.displayName.substringBeforeLast('.')
-            val partA: com.muzrc.klipsync.model.VideoClip
-            val partB: com.muzrc.klipsync.model.VideoClip
+            val partA: VideoClip
+            val partB: VideoClip
 
             if (targetClip.isImage) {
                 val durA = safePlayedOffset.coerceAtLeast(300L)
@@ -449,7 +452,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Pengurusan Audio & Beat Markers ---
+    // --- Pengurusan Audio & Auto-Beat ---
     fun selectAudioTrack(uri: Uri, extractedFromVideo: Boolean = false) {
         pausePlayback()
         DraftStorageManager.takePersistablePermissionIfPossible(appContext, uri)
@@ -565,6 +568,99 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 audioConfig = state.audioConfig.copy(fadeOutDurationMs = fadeOutMs)
             )
             syncPreviewWithState(updated)
+            updated
+        }
+    }
+
+    fun autoDetectBeats(sensitivity: BeatSensitivity) {
+        val currentState = _uiState.value
+        val audioUri = currentState.audioConfig.uri ?: return
+        if (currentState.isDetectingBeats) return
+
+        pausePlayback()
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDetectingBeats = true) }
+            val detected = BeatDetector.detectBeats(
+                context = appContext,
+                uri = audioUri,
+                startOffsetMs = currentState.audioConfig.startOffsetMs,
+                sensitivity = sensitivity
+            )
+            _uiState.update { state ->
+                state.copy(
+                    isDetectingBeats = false,
+                    audioConfig = state.audioConfig.copy(beatMarkersMs = detected)
+                )
+            }
+        }
+    }
+
+    fun autoSyncClipsToBeats(repeatClipsToFillAllBeats: Boolean) {
+        pausePlayback()
+        _uiState.update { state ->
+            val clips = state.clips
+            val beats = state.audioConfig.beatMarkersMs.filter { it >= 250L }.sorted()
+            if (clips.isEmpty() || beats.isEmpty()) return@update state
+
+            // Bina senarai sela durasi antara setiap beat
+            val intervalsMs = mutableListOf<Long>()
+            var prevBeat = 0L
+            for (beat in beats) {
+                val dur = (beat - prevBeat).coerceAtLeast(250L)
+                intervalsMs.add(dur)
+                prevBeat = beat
+            }
+            val totalAudioDur = state.audioConfig.effectiveAudioDurationMs
+            if (totalAudioDur > prevBeat + 300L) {
+                intervalsMs.add(totalAudioDur - prevBeat)
+            }
+
+            val syncedClips = mutableListOf<VideoClip>()
+            val targetCount = if (repeatClipsToFillAllBeats) {
+                intervalsMs.size
+            } else {
+                minOf(clips.size, intervalsMs.size)
+            }
+
+            for (i in 0 until targetCount) {
+                val templateClip = clips[i % clips.size]
+                val slotDurMs = intervalsMs[i]
+
+                val adjustedClip = if (templateClip.isImage) {
+                    templateClip.copy(
+                        id = UUID.randomUUID().toString(),
+                        originalDurationMs = slotDurMs,
+                        trimStartMs = 0L,
+                        trimEndMs = slotDurMs,
+                        loopCount = 1
+                    )
+                } else {
+                    val safeSpeed = templateClip.speed.coerceIn(0.25f, 4.0f)
+                    val neededRawMs = (slotDurMs * safeSpeed).toLong()
+                    val availableRawMs = (templateClip.originalDurationMs - templateClip.trimStartMs)
+                        .coerceAtLeast(250L)
+                    val finalRawDur = minOf(neededRawMs, availableRawMs)
+                    templateClip.copy(
+                        id = UUID.randomUUID().toString(),
+                        trimEndMs = templateClip.trimStartMs + finalRawDur,
+                        loopCount = 1
+                    )
+                }
+                syncedClips.add(adjustedClip)
+            }
+
+            // Kekalkan baki klip yang tidak terlibat jika mod bukan repeat
+            if (!repeatClipsToFillAllBeats && clips.size > targetCount) {
+                syncedClips.addAll(clips.subList(targetCount, clips.size))
+            }
+
+            val updated = state.copy(
+                clips = syncedClips,
+                selectedClipId = syncedClips.firstOrNull()?.id,
+                currentPositionMs = 0L
+            )
+            syncPreviewWithState(updated)
+            playerController.seekTo(0L)
             updated
         }
     }

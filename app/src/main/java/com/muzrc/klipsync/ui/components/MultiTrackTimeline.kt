@@ -42,6 +42,7 @@ fun MultiTrackTimeline(
     subtitles: List<SubtitleItem>,
     freezeFrameExtensionMs: Long,
     autoLoopExtensionMs: Long,
+    currentPositionMs: Long = 0L,
     onSelectClip: (String) -> Unit
 ) {
     val scrollState = rememberScrollState()
@@ -57,14 +58,14 @@ fun MultiTrackTimeline(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            // Trek 1: Klip Video (boleh ketik untuk pilih klip aktif)
+            // Trek 1: Klip Video / Gambar
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 if (clips.isEmpty()) {
                     TimelinePill(
-                        label = "Trek Video: Kosong",
+                        label = "Trek Visual: Kosong",
                         widthDp = 220,
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         textColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -77,10 +78,11 @@ fun MultiTrackTimeline(
                         val widthDp = ((clip.effectiveDurationMs / 1000f) * 18f)
                             .toInt()
                             .coerceIn(78, 240)
-                        val speedTag = if (clip.speed !in 0.99f..1.01f) " ${clip.speed}x" else ""
+                        val prefix = if (clip.isImage) "G" else "V"
+                        val speedTag = if (!clip.isImage && clip.speed !in 0.99f..1.01f) " ${clip.speed}x" else ""
                         val loopTag = if (clip.loopCount > 1) " [${clip.loopCount}x]" else ""
                         TimelinePill(
-                            label = "V${index + 1}$speedTag$loopTag (${TimeFormatter.formatDurationMs(clip.effectiveDurationMs)})",
+                            label = "$prefix${index + 1}$speedTag$loopTag (${TimeFormatter.formatPreciseMs(clip.effectiveDurationMs)})",
                             widthDp = widthDp,
                             containerColor = MaterialTheme.colorScheme.primary.copy(
                                 alpha = if (isSelected) 0.36f else 0.20f
@@ -119,9 +121,9 @@ fun MultiTrackTimeline(
                 }
             }
 
-            // Trek 2: Gelombang Bunyi Audio (Waveform) + Titik Penanda Beat
+            // Trek 2: Gelombang Bunyi Audio (Waveform) + Titik Penanda Beat + Playhead
             val audioWidth = if (audioConfig.uri != null) {
-                ((audioConfig.effectiveAudioDurationMs / 1000f) * 18f).toInt().coerceIn(200, 480)
+                ((audioConfig.effectiveAudioDurationMs / 1000f) * 18f).toInt().coerceIn(220, 520)
             } else {
                 220
             }
@@ -139,29 +141,32 @@ fun MultiTrackTimeline(
                         }
                     )
             ) {
-                if (audioConfig.uri != null && audioConfig.waveformPeaks.isNotEmpty()) {
+                if (audioConfig.uri != null) {
                     val barColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.65f)
                     val beatColor = MaterialTheme.colorScheme.tertiary
+                    val playheadColor = Color(0xFFFF4D4D)
                     val effectiveDur = audioConfig.effectiveAudioDurationMs.coerceAtLeast(1L)
 
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val peaks = audioConfig.waveformPeaks
-                        val barStep = size.width / peaks.size.toFloat()
-                        val barWidth = (barStep * 0.55f).coerceAtLeast(1.5f)
+                        if (peaks.isNotEmpty()) {
+                            val barStep = size.width / peaks.size.toFloat()
+                            val barWidth = (barStep * 0.55f).coerceAtLeast(1.5f)
 
-                        peaks.forEachIndexed { i, amp ->
-                            val x = i * barStep + (barStep / 2f)
-                            val barH = (size.height * amp).coerceAtLeast(3f)
-                            val topY = (size.height - barH) / 2f
-                            drawLine(
-                                color = barColor,
-                                start = Offset(x, topY),
-                                end = Offset(x, topY + barH),
-                                strokeWidth = barWidth
-                            )
+                            peaks.forEachIndexed { i, amp ->
+                                val x = i * barStep + (barStep / 2f)
+                                val barH = (size.height * amp).coerceAtLeast(3f)
+                                val topY = (size.height - barH) / 2f
+                                drawLine(
+                                    color = barColor,
+                                    start = Offset(x, topY),
+                                    end = Offset(x, topY + barH),
+                                    strokeWidth = barWidth
+                                )
+                            }
                         }
 
-                        // Lukis titik penanda Beat pada garis masa audio
+                        // Garis penanda Beat
                         audioConfig.beatMarkersMs.forEach { beatMs ->
                             if (beatMs in 0L..effectiveDur) {
                                 val bx = (beatMs.toFloat() / effectiveDur.toFloat()) * size.width
@@ -172,6 +177,17 @@ fun MultiTrackTimeline(
                                     strokeWidth = 2.5f
                                 )
                             }
+                        }
+
+                        // Garis Playhead (Penunjuk Masa Semasa)
+                        if (currentPositionMs in 0L..effectiveDur) {
+                            val px = (currentPositionMs.toFloat() / effectiveDur.toFloat()) * size.width
+                            drawLine(
+                                color = playheadColor,
+                                start = Offset(px, 0f),
+                                end = Offset(px, size.height),
+                                strokeWidth = 3f
+                            )
                         }
                     }
                 }
