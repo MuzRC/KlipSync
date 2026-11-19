@@ -62,6 +62,11 @@ class PreviewPlayerController(context: Context) {
         this.audioConfig = audio
         this.endBehavior = transitionConfig.endBehavior
 
+        // Sentiasa kemas kini cache klip supaya perubahan Zoom/Pan, Putaran & Cermin terus aktif tanpa reset pemain
+        expandedClipsCache = clips.flatMap { clip ->
+            List(clip.loopCount.coerceAtLeast(1)) { clip }
+        }
+
         val videoSignature = buildString {
             append(transitionConfig.joinMode.name).append(":")
             append(transitionConfig.durationMs).append(":")
@@ -245,18 +250,18 @@ class PreviewPlayerController(context: Context) {
                 return when (clip.motionEffect) {
                     CameraMotionEffect.NONE -> PreviewClipMotionVisual()
                     CameraMotionEffect.ZOOM_IN -> PreviewClipMotionVisual(
-                        zoomScale = 1.0f + (0.15f * progress)
+                        zoomScale = 1.0f + (0.22f * progress)
                     )
                     CameraMotionEffect.ZOOM_OUT -> PreviewClipMotionVisual(
-                        zoomScale = 1.15f - (0.15f * progress)
+                        zoomScale = 1.22f - (0.22f * progress)
                     )
                     CameraMotionEffect.PAN_LEFT -> PreviewClipMotionVisual(
-                        zoomScale = 1.12f,
-                        panOffsetXFraction = 0.05f - (0.10f * progress)
+                        zoomScale = 1.18f,
+                        panOffsetXFraction = 0.08f - (0.16f * progress)
                     )
                     CameraMotionEffect.PAN_RIGHT -> PreviewClipMotionVisual(
-                        zoomScale = 1.12f,
-                        panOffsetXFraction = -0.05f + (0.10f * progress)
+                        zoomScale = 1.18f,
+                        panOffsetXFraction = -0.08f + (0.16f * progress)
                     )
                 }
             }
