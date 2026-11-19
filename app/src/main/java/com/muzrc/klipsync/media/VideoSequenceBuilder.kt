@@ -109,7 +109,7 @@ class VideoSequenceBuilder(private val context: Context) {
         finalClipChain.forEachIndexed { index, clip ->
             val isFirst = index == 0
             val isLast = index == finalClipChain.lastIndex
-            val safeSpeed = clip.speed.coerceIn(0.25f, 4.0f)
+            val safeSpeed = if (clip.isImage) 1.0f else clip.speed.coerceIn(0.25f, 4.0f)
 
             val adjustedStart = if (!isFirst) {
                 (clip.trimStartMs + (overlapHalfMs * safeSpeed).toLong()).coerceAtMost(clip.trimEndMs)
@@ -133,16 +133,6 @@ class VideoSequenceBuilder(private val context: Context) {
             val finalPlayedDurationMs = ((adjustedEnd - adjustedStart) / safeSpeed).toLong().coerceAtLeast(100L)
             runningDurationMs += finalPlayedDurationMs
 
-            val clipping = MediaItem.ClippingConfiguration.Builder()
-                .setStartPositionMs(adjustedStart)
-                .setEndPositionMs(adjustedEnd)
-                .build()
-
-            val mediaItem = MediaItem.Builder()
-                .setUri(clip.uri)
-                .setClippingConfiguration(clipping)
-                .build()
-
             val clipVideoEffects = mutableListOf<Effect>()
 
             if (clip.rotationDegrees != 0 || clip.isMirrored) {
@@ -153,7 +143,7 @@ class VideoSequenceBuilder(private val context: Context) {
                 clipVideoEffects.add(scaleRotate)
             }
 
-            if (safeSpeed !in 0.99f..1.01f) {
+            if (!clip.isImage && safeSpeed !in 0.99f..1.01f) {
                 clipVideoEffects.add(
                     androidx.media3.effect.SpeedChangeEffect(safeSpeed)
                 )
@@ -161,7 +151,6 @@ class VideoSequenceBuilder(private val context: Context) {
 
             clipVideoEffects.addAll(globalPostEffects)
 
-            // Transisi antara setiap klip (termasuk antara kitaran video loop)
             if (finalClipChain.size > 1 && transitionConfig.transitionType != TransitionType.NONE) {
                 val transDurationUs = (transitionConfig.durationMs.coerceAtMost(finalPlayedDurationMs / 2L)) * 1000L
                 val clipDurationUs = finalPlayedDurationMs * 1000L
@@ -227,37 +216,73 @@ class VideoSequenceBuilder(private val context: Context) {
                 }
             }
 
-            val audioProcessors = mutableListOf<androidx.media3.common.audio.AudioProcessor>()
-            if (!removeOriginalAudio) {
-                if (safeSpeed !in 0.99f..1.01f) {
-                    val sonic = SonicAudioProcessor().apply {
-                        setSpeed(safeSpeed)
-                    }
-                    audioProcessors.add(sonic)
-                }
-                audioProcessors.add(
-                    AudioSequenceBuilder.createConstantVolumeProcessor(
-                        audioConfig.originalVideoVolume
-                    )
-                )
-            }
+            val editedClip = if (clip.isImage) {
+                val resolvedMime = resolveImageMimeType(clip)
+                val imageItem = MediaItem.Builder()
+                    .setUri(clip.uri)
+                    .setMimeType(resolvedMime)
+                    .setImageDurationMs(finalPlayedDurationMs)
+                    .build()
 
-            val editedClip = EditedMediaItem.Builder(mediaItem)
-                .setRemoveAudio(removeOriginalAudio)
-                .setFrameRate(exportConfig.frameRate.fps)
-                .setEffects(Effects(audioProcessors, clipVideoEffects))
-                .build()
+                EditedMediaItem.Builder(imageItem)
+                    .setRemoveAudio(true)
+                    .setFrameRate(exportConfig.frameRate.fps)
+                    .setEffects(Effects(emptyList(), clipVideoEffects))
+                    .build()
+            } else {
+                val clipping = MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(adjustedStart)
+                    .setEndPositionMs(adjustedEnd)
+                    .build()
+
+                val mediaItem = MediaItem.Builder()
+                    .setUri(clip.uri)
+                    .setClippingConfiguration(clipping)
+                    .build()
+
+                val audioProcessors = mutableListOf<androidx.media3.common.audio.AudioProcessor>()
+                if (!removeOriginalAudio) {
+                    if (safeSpeed !in 0.99f..1.01f) {
+                        val sonic = SonicAudioProcessor().apply {
+                            setSpeed(safeSpeed)
+                        }
+                        audioProcessors.add(sonic)
+                    }
+                    audioProcessors.add(
+                        AudioSequenceBuilder.createConstantVolumeProcessor(
+                            audioConfig.originalVideoVolume
+                        )
+                    )
+                }
+
+                EditedMediaItem.Builder(mediaItem)
+                    .setRemoveAudio(removeOriginalAudio)
+                    .setFrameRate(exportConfig.frameRate.fps)
+                    .setEffects(Effects(audioProcessors, clipVideoEffects))
+                    .build()
+            }
 
             editedItems.add(editedClip)
         }
 
+        // Sambungan hujung jika audio lebih panjang daripada jumlah gambar/video (Freeze Frame + Slow Zoom)
         if (hasFreezeFrame) {
             val lastClip = finalClipChain.last()
-            val freezeUri = extractLastFrameToTempFile(lastClip)
+            val freezeUri = if (lastClip.isImage) {
+                lastClip.uri
+            } else {
+                extractLastFrameToTempFile(lastClip)
+            }
+            val freezeMime = if (lastClip.isImage) {
+                resolveImageMimeType(lastClip)
+            } else {
+                MimeTypes.IMAGE_PNG
+            }
+
             if (freezeUri != null) {
                 val imageItem = MediaItem.Builder()
                     .setUri(freezeUri)
-                    .setMimeType(MimeTypes.IMAGE_PNG)
+                    .setMimeType(freezeMime)
                     .setImageDurationMs(freezeFrameExtensionMs)
                     .build()
 
@@ -284,6 +309,15 @@ class VideoSequenceBuilder(private val context: Context) {
         }
 
         return EditedMediaItemSequence(editedItems)
+    }
+
+    private fun resolveImageMimeType(clip: VideoClip): String {
+        val raw = clip.mimeType ?: context.contentResolver.getType(clip.uri) ?: ""
+        return when {
+            raw.contains("png", ignoreCase = true) -> MimeTypes.IMAGE_PNG
+            raw.contains("webp", ignoreCase = true) -> MimeTypes.IMAGE_WEBP
+            else -> MimeTypes.IMAGE_JPEG
+        }
     }
 
     private fun createSlowZoomEffect(totalDurationUs: Long): MatrixTransformation {

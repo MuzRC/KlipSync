@@ -48,7 +48,6 @@ object DraftStorageManager {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         } catch (_: Exception) {
-            // Sesetengah picker tidak menyokong persistable permission, abaikan dengan selamat
         }
     }
 
@@ -97,6 +96,8 @@ object DraftStorageManager {
                     put("isMirrored", clip.isMirrored)
                     put("width", clip.width)
                     put("height", clip.height)
+                    put("isImage", clip.isImage)
+                    put("mimeType", clip.mimeType ?: "")
                 })
             }
             put("clips", clipsArr)
@@ -221,7 +222,9 @@ object DraftStorageManager {
                             rotationDegrees = c.optInt("rotationDegrees", 0),
                             isMirrored = c.optBoolean("isMirrored", false),
                             width = c.optInt("width", 1080),
-                            height = c.optInt("height", 1920)
+                            height = c.optInt("height", 1920),
+                            isImage = c.optBoolean("isImage", false),
+                            mimeType = c.optString("mimeType").ifBlank { null }
                         )
                     )
                 }

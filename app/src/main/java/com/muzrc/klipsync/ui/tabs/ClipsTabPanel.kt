@@ -19,13 +19,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.RotateRight
+import androidx.compose.material.icons.rounded.VideoCall
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -50,6 +51,7 @@ import com.muzrc.klipsync.model.TransitionType
 import com.muzrc.klipsync.model.VideoClip
 import com.muzrc.klipsync.model.VideoEndBehavior
 import com.muzrc.klipsync.util.TimeFormatter
+import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -64,6 +66,7 @@ fun ClipsTabPanel(
     onMoveUp: (Int) -> Unit,
     onMoveDown: (Int) -> Unit,
     onTrimClip: (String, Long, Long) -> Unit,
+    onImageDurationChange: (String, Long) -> Unit,
     onCutClip: (String) -> Unit,
     onLoopCountChange: (String, Int) -> Unit,
     onRotateClip: (String) -> Unit,
@@ -81,6 +84,14 @@ fun ClipsTabPanel(
         }
     }
 
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 30)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            onAddClips(uris)
+        }
+    }
+
     val isLoopingActive = clips.any { it.loopCount > 1 } ||
         (clips.isNotEmpty() && hasLongerAudio && transitionConfig.endBehavior == VideoEndBehavior.LOOP_TO_AUDIO)
     val showTransitionControls = clips.size > 1 || isLoopingActive
@@ -92,20 +103,42 @@ fun ClipsTabPanel(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Button(
-            onClick = {
-                videoPicker.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
+        // Dua butang jelas: Tambah Video & Tambah Gambar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(Icons.Rounded.Add, contentDescription = null)
-            Text(
-                text = "Tambah Klip Video",
-                modifier = Modifier.padding(start = 6.dp),
-                fontWeight = FontWeight.SemiBold
-            )
+            Button(
+                onClick = {
+                    videoPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                    )
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Rounded.VideoCall, contentDescription = null)
+                Text(
+                    text = "+ Video",
+                    modifier = Modifier.padding(start = 6.dp),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            OutlinedButton(
+                onClick = {
+                    imagePicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = null)
+                Text(
+                    text = "+ Gambar",
+                    modifier = Modifier.padding(start = 6.dp),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
 
         if (clips.isNotEmpty() && hasLongerAudio) {
@@ -119,7 +152,7 @@ fun ClipsTabPanel(
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = "Apabila Video Tamat Awal Daripada Lagu",
+                        text = "Apabila Visual Tamat Awal Daripada Lagu",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.tertiary
                     )
@@ -136,7 +169,6 @@ fun ClipsTabPanel(
             }
         }
 
-        // Paparkan kawalan Transisi & Pertindihan apabila ada banyak klip ATAU video sedang diulang (Loop)
         if (showTransitionControls) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -148,7 +180,7 @@ fun ClipsTabPanel(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Cara Gabungan Klip / Ulangan Loop",
+                        text = "Cara Gabungan Klip / Gambar",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -164,7 +196,7 @@ fun ClipsTabPanel(
                     }
 
                     Text(
-                        text = "Transisi Antara Klip & Loop (Lembutkan Cut)",
+                        text = "Transisi Antara Babak & Loop",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -184,7 +216,7 @@ fun ClipsTabPanel(
                     ) {
                         val sec = transitionConfig.durationMs / 1000f
                         Text(
-                            text = "Tempoh Transisi / Pertindihan: ${String.format("%.1f", sec)}s",
+                            text = "Tempoh Transisi / Pertindihan: ${String.format(Locale.US, "%.1f", sec)}s",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Slider(
@@ -215,8 +247,9 @@ fun ClipsTabPanel(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+                        val typePrefix = if (clip.isImage) "[Gambar] " else ""
                         Text(
-                            text = "${index + 1}. ${clip.displayName}",
+                            text = "${index + 1}. $typePrefix${clip.displayName}",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -247,24 +280,38 @@ fun ClipsTabPanel(
                         }
                     }
 
-                    Text(
-                        text = "Potong: ${TimeFormatter.formatPreciseMs(clip.trimStartMs)} – ${TimeFormatter.formatPreciseMs(clip.trimEndMs)} • Laju ${clip.speed}x",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    if (clip.originalDurationMs > 300L) {
-                        RangeSlider(
-                            value = clip.trimStartMs.toFloat()..clip.trimEndMs.toFloat(),
-                            onValueChange = { range ->
-                                onTrimClip(
-                                    clip.id,
-                                    range.start.toLong(),
-                                    range.endInclusive.toLong()
-                                )
-                            },
-                            valueRange = 0f..clip.originalDurationMs.toFloat()
+                    if (clip.isImage) {
+                        val sec = clip.singlePlayDurationMs / 1000f
+                        Text(
+                            text = "Tempoh Paparan Gambar: ${String.format(Locale.US, "%.1f", sec)} saat",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
                         )
+                        Slider(
+                            value = clip.singlePlayDurationMs.coerceIn(1000L, 30000L).toFloat(),
+                            onValueChange = { onImageDurationChange(clip.id, it.toLong()) },
+                            valueRange = 1000f..30000f
+                        )
+                    } else {
+                        Text(
+                            text = "Potong: ${TimeFormatter.formatPreciseMs(clip.trimStartMs)} – ${TimeFormatter.formatPreciseMs(clip.trimEndMs)} • Laju ${clip.speed}x",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        if (clip.originalDurationMs > 300L) {
+                            RangeSlider(
+                                value = clip.trimStartMs.toFloat()..clip.trimEndMs.toFloat(),
+                                onValueChange = { range ->
+                                    onTrimClip(
+                                        clip.id,
+                                        range.start.toLong(),
+                                        range.endInclusive.toLong()
+                                    )
+                                },
+                                valueRange = 0f..clip.originalDurationMs.toFloat()
+                            )
+                        }
                     }
 
                     FlowRow(

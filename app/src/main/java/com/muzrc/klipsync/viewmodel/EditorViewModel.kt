@@ -97,14 +97,14 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(selectedClipId = clipId) }
     }
 
-    // --- Pengurusan Klip Video ---
+    // --- Pengurusan Klip Video & Gambar ---
     fun addVideoClips(uris: List<Uri>) {
         if (uris.isEmpty()) return
         pausePlayback()
         viewModelScope.launch {
             val newClips = uris.map { uri ->
                 DraftStorageManager.takePersistablePermissionIfPossible(appContext, uri)
-                metadataReader.readVideoClip(uri)
+                metadataReader.readMediaClip(uri)
             }
             _uiState.update { state ->
                 val merged = state.clips + newClips
@@ -182,6 +182,27 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun updateImageDuration(clipId: String, durationMs: Long) {
+        pausePlayback()
+        _uiState.update { state ->
+            val safeDur = durationMs.coerceIn(1000L, 60000L)
+            val updatedClips = state.clips.map { clip ->
+                if (clip.id == clipId && clip.isImage) {
+                    clip.copy(
+                        originalDurationMs = safeDur,
+                        trimStartMs = 0L,
+                        trimEndMs = safeDur
+                    )
+                } else {
+                    clip
+                }
+            }
+            val updated = state.copy(clips = updatedClips)
+            syncPreviewWithState(updated)
+            updated
+        }
+    }
+
     fun setClipLoopCount(clipId: String, loopCount: Int) {
         pausePlayback()
         _uiState.update { state ->
@@ -189,7 +210,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId) clip.copy(loopCount = safeLoop) else clip
             }
-            // Aktifkan transisi Crossfade secara automatik jika loop > 1 dan transisi masih NONE
             val nextTransition = if (safeLoop > 1 && state.transitionConfig.transitionType == TransitionType.NONE) {
                 state.transitionConfig.copy(transitionType = TransitionType.CROSSFADE)
             } else {
@@ -206,7 +226,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { state ->
             val safeSpeed = speed.coerceIn(0.25f, 3.0f)
             val updatedClips = state.clips.map { clip ->
-                if (clip.id == clipId) clip.copy(speed = safeSpeed) else clip
+                if (clip.id == clipId && !clip.isImage) clip.copy(speed = safeSpeed) else clip
             }
             val updated = state.copy(clips = updatedClips)
             syncPreviewWithState(updated)
@@ -218,7 +238,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         pausePlayback()
         _uiState.update { state ->
             val safeSpeed = speed.coerceIn(0.25f, 3.0f)
-            val updatedClips = state.clips.map { it.copy(speed = safeSpeed) }
+            val updatedClips = state.clips.map {
+                if (!it.isImage) it.copy(speed = safeSpeed) else it
+            }
             val updated = state.copy(clips = updatedClips)
             syncPreviewWithState(updated)
             updated
@@ -269,23 +291,47 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 singlePlayedDur / 2L
             }
 
-            val rawOffset = (safePlayedOffset * targetClip.speed).toLong()
-            val splitPointMs = (targetClip.trimStartMs + rawOffset)
-                .coerceIn(targetClip.trimStartMs + 200L, targetClip.trimEndMs - 200L)
-
             val baseName = targetClip.displayName.substringBeforeLast('.')
-            val partA = targetClip.copy(
-                id = UUID.randomUUID().toString(),
-                displayName = "$baseName (A)",
-                trimEndMs = splitPointMs,
-                loopCount = 1
-            )
-            val partB = targetClip.copy(
-                id = UUID.randomUUID().toString(),
-                displayName = "$baseName (B)",
-                trimStartMs = splitPointMs,
-                loopCount = 1
-            )
+            val partA: com.muzrc.klipsync.model.VideoClip
+            val partB: com.muzrc.klipsync.model.VideoClip
+
+            if (targetClip.isImage) {
+                val durA = safePlayedOffset.coerceAtLeast(300L)
+                val durB = (singlePlayedDur - durA).coerceAtLeast(300L)
+                partA = targetClip.copy(
+                    id = UUID.randomUUID().toString(),
+                    displayName = "$baseName (1)",
+                    originalDurationMs = durA,
+                    trimStartMs = 0L,
+                    trimEndMs = durA,
+                    loopCount = 1
+                )
+                partB = targetClip.copy(
+                    id = UUID.randomUUID().toString(),
+                    displayName = "$baseName (2)",
+                    originalDurationMs = durB,
+                    trimStartMs = 0L,
+                    trimEndMs = durB,
+                    loopCount = 1
+                )
+            } else {
+                val rawOffset = (safePlayedOffset * targetClip.speed).toLong()
+                val splitPointMs = (targetClip.trimStartMs + rawOffset)
+                    .coerceIn(targetClip.trimStartMs + 200L, targetClip.trimEndMs - 200L)
+
+                partA = targetClip.copy(
+                    id = UUID.randomUUID().toString(),
+                    displayName = "$baseName (A)",
+                    trimEndMs = splitPointMs,
+                    loopCount = 1
+                )
+                partB = targetClip.copy(
+                    id = UUID.randomUUID().toString(),
+                    displayName = "$baseName (B)",
+                    trimStartMs = splitPointMs,
+                    loopCount = 1
+                )
+            }
 
             val mutable = state.clips.toMutableList()
             mutable.removeAt(targetIndex)
@@ -331,7 +377,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun setVideoEndBehavior(behavior: VideoEndBehavior) {
         pausePlayback()
         _uiState.update { state ->
-            // Aktifkan transisi Crossfade secara automatik apabila pilih Auto-Loop Video supaya cut tidak ketara
             val nextTransition = if (
                 behavior == VideoEndBehavior.LOOP_TO_AUDIO &&
                 state.transitionConfig.transitionType == TransitionType.NONE

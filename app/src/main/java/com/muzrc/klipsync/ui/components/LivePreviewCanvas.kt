@@ -1,5 +1,6 @@
 package com.muzrc.klipsync.ui.components
 
+import android.graphics.BitmapFactory
 import android.graphics.ColorMatrixColorFilter
 import android.view.ViewGroup
 import androidx.annotation.OptIn
@@ -22,9 +23,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -69,11 +73,23 @@ fun LivePreviewCanvas(
 ) {
     val context = LocalContext.current
 
+    val activeImageBitmap = remember(activeClip?.id, activeClip?.uri, activeClip?.isImage) {
+        if (activeClip == null || !activeClip.isImage) return@remember null
+        try {
+            val opts = BitmapFactory.Options().apply { inSampleSize = 1 }
+            context.contentResolver.openInputStream(activeClip.uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, opts)?.asImageBitmap()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     val watermarkBitmap = remember(watermarkConfig.uri) {
         val uri = watermarkConfig.uri ?: return@remember null
         try {
             context.contentResolver.openInputStream(uri)?.use { stream ->
-                android.graphics.BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                BitmapFactory.decodeStream(stream)?.asImageBitmap()
             }
         } catch (_: Exception) {
             null
@@ -89,7 +105,7 @@ fun LivePreviewCanvas(
     ) {
         if (!hasClips) {
             Text(
-                text = "Tambah klip video di bawah untuk mula menyunting",
+                text = "Tambah klip video atau gambar di bawah untuk mula menyunting",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -131,60 +147,85 @@ fun LivePreviewCanvas(
             Color.Black
         }
 
+        val m = ColorMatrixBuilder.computeCombined4x4Matrix(colorConfig)
+        val matrixValues = floatArrayOf(
+            m[0], m[4], m[8], m[12], m[3] * 255f,
+            m[1], m[5], m[9], m[13], m[7] * 255f,
+            m[2], m[6], m[10], m[14], m[11] * 255f,
+            0f, 0f, 0f, 1f, 0f
+        )
+
         Box(
             modifier = frameModifier
                 .clip(RoundedCornerShape(8.dp))
                 .background(containerBg)
                 .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        player = videoPlayer
-                    }
-                },
-                update = { view ->
-                    view.player = videoPlayer
-                    view.resizeMode = if (
-                        aspectRatio == AspectRatioPreset.ORIGINAL ||
-                        cropScaleMode == CropScaleMode.FIT_BLUR
-                    ) {
-                        AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    } else {
-                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                    }
+            if (activeClip?.isImage == true && activeImageBitmap != null) {
+                val imgScale = if (
+                    aspectRatio == AspectRatioPreset.ORIGINAL ||
+                    cropScaleMode == CropScaleMode.FIT_BLUR
+                ) {
+                    ContentScale.Fit
+                } else {
+                    ContentScale.Crop
+                }
 
-                    val m = ColorMatrixBuilder.computeCombined4x4Matrix(colorConfig)
-                    val androidColorMatrix = android.graphics.ColorMatrix(
-                        floatArrayOf(
-                            m[0], m[4], m[8], m[12], m[3] * 255f,
-                            m[1], m[5], m[9], m[13], m[7] * 255f,
-                            m[2], m[6], m[10], m[14], m[11] * 255f,
-                            0f, 0f, 0f, 1f, 0f
-                        )
-                    )
-                    val paint = android.graphics.Paint().apply {
-                        colorFilter = ColorMatrixColorFilter(androidColorMatrix)
-                    }
-                    view.videoSurfaceView?.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, paint)
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = combinedZoom * mirrorScaleX
-                        scaleY = combinedZoom
-                        rotationZ = rotDeg
-                        translationX = size.width * transitionVisual.slideOffsetXFraction
-                    }
-            )
+                Image(
+                    bitmap = activeImageBitmap,
+                    contentDescription = activeClip.displayName,
+                    contentScale = imgScale,
+                    colorFilter = ColorFilter.colorMatrix(ColorMatrix(matrixValues)),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = combinedZoom * mirrorScaleX
+                            scaleY = combinedZoom
+                            rotationZ = rotDeg
+                            translationX = size.width * transitionVisual.slideOffsetXFraction
+                        }
+                )
+            } else {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            useController = false
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            player = videoPlayer
+                        }
+                    },
+                    update = { view ->
+                        view.player = videoPlayer
+                        view.resizeMode = if (
+                            aspectRatio == AspectRatioPreset.ORIGINAL ||
+                            cropScaleMode == CropScaleMode.FIT_BLUR
+                        ) {
+                            AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        } else {
+                            AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                        }
 
-            // Lapisan gelapkan transisi di atas SurfaceView supaya Crossfade/Fade-to-Black sentiasa kelihatan
+                        val androidColorMatrix = android.graphics.ColorMatrix(matrixValues)
+                        val paint = android.graphics.Paint().apply {
+                            colorFilter = ColorMatrixColorFilter(androidColorMatrix)
+                        }
+                        view.videoSurfaceView?.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, paint)
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = combinedZoom * mirrorScaleX
+                            scaleY = combinedZoom
+                            rotationZ = rotDeg
+                            translationX = size.width * transitionVisual.slideOffsetXFraction
+                        }
+                )
+            }
+
             if (transitionVisual.blackOverlayAlpha > 0.01f) {
                 Box(
                     modifier = Modifier

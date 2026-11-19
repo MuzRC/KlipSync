@@ -54,7 +54,8 @@ fun EditorScreen(viewModel: EditorViewModel) {
         state.freezeFrameExtensionMs > 0L &&
         state.currentPositionMs >= state.totalVideoDurationMs
 
-    val currentPlayingClip = viewModel.playerController.currentActiveClip() ?: state.selectedClip
+    val currentPlayingClip = viewModel.playerController.currentActiveClipAt(state.currentPositionMs)
+        ?: state.selectedClip
     val transitionVisual = viewModel.playerController.computePreviewTransitionVisual(
         positionMs = state.currentPositionMs,
         transitionType = state.transitionConfig.transitionType,
@@ -143,6 +144,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
                         onMoveUp = { viewModel.moveClipUp(it) },
                         onMoveDown = { viewModel.moveClipDown(it) },
                         onTrimClip = { id, s, e -> viewModel.updateClipTrim(id, s, e) },
+                        onImageDurationChange = { id, dur -> viewModel.updateImageDuration(id, dur) },
                         onCutClip = { id -> viewModel.cutClipAtTimelinePosition(id, state.currentPositionMs) },
                         onLoopCountChange = { id, count -> viewModel.setClipLoopCount(id, count) },
                         onRotateClip = { viewModel.rotateClip90(it) },

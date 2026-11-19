@@ -37,12 +37,17 @@ class PreviewPlayerController(context: Context) {
 
     private var expandedClipsCache: List<VideoClip> = emptyList()
     private var clipPlayedDurationsMs: List<Long> = emptyList()
+    private var videoItemIndexMap: List<Int> = emptyList() // -1 jika segmen ialah Gambar
     private var totalVideoDurationMs: Long = 0L
     private var audioConfig: AudioTrackConfig = AudioTrackConfig()
     private var endBehavior: VideoEndBehavior = VideoEndBehavior.FREEZE_FRAME
     private var lastVideoSignature: String = ""
     private var lastAudioSignature: String = ""
     private var lastDriftCorrectionRealtimeMs: Long = 0L
+
+    // Pemasa dalaman apabila garis masa hanya mengandungi Gambar tanpa trek lagu
+    private var standaloneClockBasePositionMs: Long = 0L
+    private var standaloneClockStartRealtimeMs: Long = 0L
 
     fun syncMedia(
         clips: List<VideoClip>,
@@ -57,7 +62,7 @@ class PreviewPlayerController(context: Context) {
             append(transitionConfig.durationMs).append(":")
             append(transitionConfig.endBehavior.name).append("|")
             clips.forEach {
-                append("${it.id}:${it.uri}:${it.trimStartMs}:${it.trimEndMs}:${it.loopCount}:${it.speed};")
+                append("${it.id}:${it.uri}:${it.trimStartMs}:${it.trimEndMs}:${it.loopCount}:${it.speed}:${it.isImage};")
             }
         }
 
@@ -86,6 +91,7 @@ class PreviewPlayerController(context: Context) {
         if (clips.isEmpty()) {
             expandedClipsCache = emptyList()
             clipPlayedDurationsMs = emptyList()
+            videoItemIndexMap = emptyList()
             totalVideoDurationMs = 0L
             return
         }
@@ -103,11 +109,12 @@ class PreviewPlayerController(context: Context) {
 
         val playedDurations = mutableListOf<Long>()
         val items = mutableListOf<MediaItem>()
+        val indexMap = mutableListOf<Int>()
 
         expandedClips.forEachIndexed { index, clip ->
             val isFirst = index == 0
             val isLast = index == expandedClips.lastIndex
-            val safeSpeed = clip.speed.coerceIn(0.25f, 4.0f)
+            val safeSpeed = if (clip.isImage) 1.0f else clip.speed.coerceIn(0.25f, 4.0f)
 
             val start = if (!isFirst) {
                 (clip.trimStartMs + (overlapHalfMs * safeSpeed).toLong()).coerceAtMost(clip.trimEndMs)
@@ -124,28 +131,37 @@ class PreviewPlayerController(context: Context) {
             val playedDur = ((end - start) / safeSpeed).toLong().coerceAtLeast(0L)
             playedDurations.add(playedDur)
 
-            val clipping = MediaItem.ClippingConfiguration.Builder()
-                .setStartPositionMs(start)
-                .setEndPositionMs(end)
-                .build()
-
-            items.add(
-                MediaItem.Builder()
-                    .setUri(clip.uri)
-                    .setClippingConfiguration(clipping)
+            if (clip.isImage) {
+                indexMap.add(-1)
+            } else {
+                indexMap.add(items.size)
+                val clipping = MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(start)
+                    .setEndPositionMs(end)
                     .build()
-            )
+
+                items.add(
+                    MediaItem.Builder()
+                        .setUri(clip.uri)
+                        .setClippingConfiguration(clipping)
+                        .build()
+                )
+            }
         }
 
         clipPlayedDurationsMs = playedDurations
+        videoItemIndexMap = indexMap
         totalVideoDurationMs = playedDurations.sum()
-        videoPlayer.repeatMode = if (transitionConfig.endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
-            Player.REPEAT_MODE_ALL
-        } else {
-            Player.REPEAT_MODE_OFF
+
+        if (items.isNotEmpty()) {
+            videoPlayer.repeatMode = if (transitionConfig.endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
+                Player.REPEAT_MODE_ALL
+            } else {
+                Player.REPEAT_MODE_OFF
+            }
+            videoPlayer.setMediaItems(items)
+            videoPlayer.prepare()
         }
-        videoPlayer.setMediaItems(items)
-        videoPlayer.prepare()
     }
 
     private fun rebuildAudioItem(audio: AudioTrackConfig) {
@@ -169,16 +185,32 @@ class PreviewPlayerController(context: Context) {
         audioPlayer.prepare()
     }
 
-    fun currentActiveClip(): VideoClip? {
-        if (expandedClipsCache.isEmpty()) return null
-        val idx = videoPlayer.currentMediaItemIndex.coerceIn(0, expandedClipsCache.lastIndex)
-        return expandedClipsCache[idx]
+    private fun findSegmentIndexAt(positionMs: Long): Int {
+        if (clipPlayedDurationsMs.isEmpty() || totalVideoDurationMs <= 0L) return -1
+        val mappedPos = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
+            positionMs % totalVideoDurationMs
+        } else {
+            positionMs.coerceIn(0L, totalVideoDurationMs)
+        }
+        var acc = 0L
+        for (i in clipPlayedDurationsMs.indices) {
+            val dur = clipPlayedDurationsMs[i]
+            if (mappedPos < acc + dur || i == clipPlayedDurationsMs.lastIndex) {
+                return i
+            }
+            acc += dur
+        }
+        return clipPlayedDurationsMs.lastIndex
     }
 
-    /**
-     * Mengira kesan visual transisi (fade gelap, zoom, slide) di sempadan klip & loop
-     * supaya boleh dirender dengan tepat di atas SurfaceView pratonton.
-     */
+    fun currentActiveClipAt(positionMs: Long): VideoClip? {
+        val segIdx = findSegmentIndexAt(positionMs)
+        if (segIdx in expandedClipsCache.indices) {
+            return expandedClipsCache[segIdx]
+        }
+        return expandedClipsCache.firstOrNull()
+    }
+
     fun computePreviewTransitionVisual(
         positionMs: Long,
         transitionType: TransitionType,
@@ -216,7 +248,6 @@ class PreviewPlayerController(context: Context) {
                 val isVeryFirstSegment = (loopCycleIndex == 0L && i == 0)
                 val isVeryLastSegment = (endBehavior != VideoEndBehavior.LOOP_TO_AUDIO && i == clipPlayedDurationsMs.lastIndex)
 
-                // Fasa Masuk (Awal Segmen)
                 if (!isVeryFirstSegment && localPos < halfTrans) {
                     val progress = (localPos.toFloat() / halfTrans.toFloat()).coerceIn(0f, 1f)
                     return when (transitionType) {
@@ -237,7 +268,6 @@ class PreviewPlayerController(context: Context) {
                     }
                 }
 
-                // Fasa Keluar (Hujung Segmen)
                 if (!isVeryLastSegment && localPos > (dur - halfTrans)) {
                     val remaining = (dur - localPos).coerceAtLeast(0L)
                     val progress = (remaining.toFloat() / halfTrans.toFloat()).coerceIn(0f, 1f)
@@ -267,12 +297,15 @@ class PreviewPlayerController(context: Context) {
     }
 
     private fun applyCurrentClipSpeed() {
-        val activeClip = currentActiveClip() ?: return
+        val activeClip = currentActiveClipAt(currentTimelinePositionMs()) ?: return
+        if (activeClip.isImage) return
         val targetSpeed = activeClip.speed.coerceIn(0.25f, 4.0f)
         if (abs(videoPlayer.playbackParameters.speed - targetSpeed) > 0.01f) {
             videoPlayer.playbackParameters = PlaybackParameters(targetSpeed)
         }
     }
+
+    private fun hasAnyVideoMedia(): Boolean = videoItemIndexMap.any { it >= 0 }
 
     fun play(totalTimelineDurationMs: Long) {
         if (totalTimelineDurationMs <= 0L) return
@@ -281,28 +314,45 @@ class PreviewPlayerController(context: Context) {
             seekTo(0L)
         }
 
-        lastDriftCorrectionRealtimeMs = SystemClock.elapsedRealtime()
-        applyCurrentClipSpeed()
-        val canPlayVideo = totalVideoDurationMs > 0L && (
-            endBehavior == VideoEndBehavior.LOOP_TO_AUDIO ||
-                currentTimelinePositionMs() < totalVideoDurationMs
-            )
-        if (canPlayVideo) {
-            videoPlayer.play()
+        val startPos = currentTimelinePositionMs()
+        standaloneClockBasePositionMs = startPos
+        standaloneClockStartRealtimeMs = SystemClock.elapsedRealtime()
+        lastDriftCorrectionRealtimeMs = standaloneClockStartRealtimeMs
+
+        val activeClip = currentActiveClipAt(startPos)
+        if (hasAnyVideoMedia() && activeClip != null && !activeClip.isImage) {
+            applyCurrentClipSpeed()
+            val canPlayVideo = totalVideoDurationMs > 0L && (
+                endBehavior == VideoEndBehavior.LOOP_TO_AUDIO ||
+                    startPos < totalVideoDurationMs
+                )
+            if (canPlayVideo) {
+                videoPlayer.play()
+            }
+        } else {
+            videoPlayer.pause()
         }
-        if (audioConfig.uri != null && currentTimelinePositionMs() < audioConfig.effectiveAudioDurationMs) {
+
+        if (audioConfig.uri != null && startPos < audioConfig.effectiveAudioDurationMs) {
             audioPlayer.play()
         }
     }
 
     fun pause() {
+        standaloneClockBasePositionMs = currentTimelinePositionMs()
+        standaloneClockStartRealtimeMs = 0L
         videoPlayer.pause()
         audioPlayer.pause()
     }
 
     fun seekTo(positionMs: Long) {
         val targetMs = positionMs.coerceAtLeast(0L)
+        standaloneClockBasePositionMs = targetMs
+        if (standaloneClockStartRealtimeMs > 0L) {
+            standaloneClockStartRealtimeMs = SystemClock.elapsedRealtime()
+        }
         lastDriftCorrectionRealtimeMs = SystemClock.elapsedRealtime()
+
         seekVideoOnly(targetMs)
 
         if (audioConfig.uri != null && audioConfig.effectiveAudioDurationMs > 0L) {
@@ -319,71 +369,71 @@ class PreviewPlayerController(context: Context) {
     }
 
     private fun seekVideoOnly(targetMs: Long) {
-        if (clipPlayedDurationsMs.isEmpty() || totalVideoDurationMs <= 0L) return
+        if (clipPlayedDurationsMs.isEmpty() || totalVideoDurationMs <= 0L || !hasAnyVideoMedia()) return
 
-        if (targetMs >= totalVideoDurationMs && endBehavior == VideoEndBehavior.FREEZE_FRAME) {
-            val lastIndex = clipPlayedDurationsMs.lastIndex
-            val lastClip = expandedClipsCache.getOrNull(lastIndex)
-            val speed = lastClip?.speed?.coerceIn(0.25f, 4.0f) ?: 1f
-            val rawEndOffset = ((clipPlayedDurationsMs[lastIndex] * speed).toLong() - 40L)
-                .coerceAtLeast(0L)
-            videoPlayer.seekTo(lastIndex, rawEndOffset)
-            videoPlayer.pause()
+        val mappedVideoPos = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
+            targetMs % totalVideoDurationMs
         } else {
-            val mappedVideoPos = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
-                targetMs % totalVideoDurationMs
-            } else {
-                targetMs
-            }
-            var accumulated = 0L
-            for (i in clipPlayedDurationsMs.indices) {
-                val playedDur = clipPlayedDurationsMs[i]
-                if (mappedVideoPos < accumulated + playedDur || i == clipPlayedDurationsMs.lastIndex) {
+            targetMs.coerceAtMost(totalVideoDurationMs)
+        }
+
+        var accumulated = 0L
+        for (i in clipPlayedDurationsMs.indices) {
+            val playedDur = clipPlayedDurationsMs[i]
+            if (mappedVideoPos < accumulated + playedDur || i == clipPlayedDurationsMs.lastIndex) {
+                val playerIdx = videoItemIndexMap[i]
+                if (playerIdx >= 0) {
                     val speed = expandedClipsCache.getOrNull(i)?.speed?.coerceIn(0.25f, 4.0f) ?: 1f
                     val localPlayedPos = (mappedVideoPos - accumulated).coerceIn(0L, playedDur)
                     val localRawPos = (localPlayedPos * speed).toLong()
-                    videoPlayer.seekTo(i, localRawPos)
-                    break
+                    videoPlayer.seekTo(playerIdx, localRawPos)
+                } else {
+                    videoPlayer.pause()
                 }
-                accumulated += playedDur
+                break
             }
+            accumulated += playedDur
         }
     }
 
     fun tickSync(isPlaying: Boolean, totalTimelineDurationMs: Long): Long {
-        applyCurrentClipSpeed()
         val hasAudio = audioConfig.uri != null && audioConfig.effectiveAudioDurationMs > 0L
         val pos = currentTimelinePositionMs().coerceIn(0L, totalTimelineDurationMs)
         applyVolumes(pos)
 
         if (isPlaying) {
-            val nowMs = SystemClock.elapsedRealtime()
-            val canCorrectDrift = (nowMs - lastDriftCorrectionRealtimeMs) > 950L
+            val activeClip = currentActiveClipAt(pos)
+            val isImageSegment = activeClip?.isImage == true
 
-            if (canCorrectDrift &&
-                hasAudio &&
-                totalVideoDurationMs > 0L &&
-                pos < audioConfig.effectiveAudioDurationMs &&
-                videoPlayer.playbackState == Player.STATE_READY
-            ) {
-                val expectedVideoPos = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
-                    pos % totalVideoDurationMs
-                } else {
-                    pos.coerceAtMost(totalVideoDurationMs)
+            if (isImageSegment) {
+                if (videoPlayer.isPlaying) {
+                    videoPlayer.pause()
+                }
+            } else if (hasAnyVideoMedia()) {
+                applyCurrentClipSpeed()
+                val inVideoRange = pos < totalVideoDurationMs || endBehavior == VideoEndBehavior.LOOP_TO_AUDIO
+                if (inVideoRange && !videoPlayer.isPlaying && videoPlayer.playbackState == Player.STATE_READY) {
+                    seekVideoOnly(pos)
+                    videoPlayer.play()
                 }
 
-                // Elakkan gangguan seek semasa ExoPlayer sedang melengkapkan peralihan sempadan loop
-                val nearLoopBoundary = expectedVideoPos < 350L ||
-                    (totalVideoDurationMs - expectedVideoPos) < 350L
-
-                if (!nearLoopBoundary && (pos < totalVideoDurationMs || endBehavior == VideoEndBehavior.LOOP_TO_AUDIO)) {
-                    val actualVideoPos = getRawVideoPositionMs()
-                    if (abs(expectedVideoPos - actualVideoPos) > 400L) {
-                        lastDriftCorrectionRealtimeMs = nowMs
-                        seekVideoOnly(pos)
-                        applyCurrentClipSpeed()
-                        if (!videoPlayer.isPlaying) {
-                            videoPlayer.play()
+                val nowMs = SystemClock.elapsedRealtime()
+                val canCorrectDrift = (nowMs - lastDriftCorrectionRealtimeMs) > 950L
+                if (canCorrectDrift && hasAudio && pos < audioConfig.effectiveAudioDurationMs) {
+                    val expectedVideoPos = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
+                        pos % totalVideoDurationMs
+                    } else {
+                        pos.coerceAtMost(totalVideoDurationMs)
+                    }
+                    val nearBoundary = expectedVideoPos < 350L || (totalVideoDurationMs - expectedVideoPos) < 350L
+                    if (!nearBoundary && inVideoRange) {
+                        val actualVideoPos = getRawVideoPositionMs()
+                        if (abs(expectedVideoPos - actualVideoPos) > 400L) {
+                            lastDriftCorrectionRealtimeMs = nowMs
+                            seekVideoOnly(pos)
+                            if (!videoPlayer.isPlaying) {
+                                videoPlayer.play()
+                            }
                         }
                     }
                 }
@@ -407,34 +457,37 @@ class PreviewPlayerController(context: Context) {
     }
 
     private fun getRawVideoPositionMs(): Long {
-        if (clipPlayedDurationsMs.isEmpty() || totalVideoDurationMs <= 0L) return 0L
-        val idx = videoPlayer.currentMediaItemIndex.coerceIn(0, clipPlayedDurationsMs.lastIndex)
+        if (!hasAnyVideoMedia() || clipPlayedDurationsMs.isEmpty() || totalVideoDurationMs <= 0L) return 0L
+        val currentPlayerIdx = videoPlayer.currentMediaItemIndex
+        val segIdx = videoItemIndexMap.indexOf(currentPlayerIdx)
+        if (segIdx == -1) return 0L
+
         var before = 0L
-        for (i in 0 until idx) {
+        for (i in 0 until segIdx) {
             before += clipPlayedDurationsMs[i]
         }
-        val speed = expandedClipsCache.getOrNull(idx)?.speed?.coerceIn(0.25f, 4.0f) ?: 1f
+        val speed = expandedClipsCache.getOrNull(segIdx)?.speed?.coerceIn(0.25f, 4.0f) ?: 1f
         val currentClipPlayedMs = (videoPlayer.currentPosition.coerceAtLeast(0L) / speed).toLong()
         return (before + currentClipPlayedMs).coerceAtMost(totalVideoDurationMs)
     }
 
     fun currentTimelinePositionMs(): Long {
-        val audioPos = if (audioConfig.uri != null && audioConfig.effectiveAudioDurationMs > 0L) {
-            audioPlayer.currentPosition.coerceAtLeast(0L)
-        } else {
-            0L
+        if (audioConfig.uri != null && audioConfig.effectiveAudioDurationMs > 0L) {
+            val audioPos = audioPlayer.currentPosition.coerceAtLeast(0L)
+            if (audioPos < audioConfig.effectiveAudioDurationMs - 50L) {
+                return audioPos
+            }
         }
 
-        val videoPos = getRawVideoPositionMs()
+        if (standaloneClockStartRealtimeMs > 0L) {
+            val elapsed = (SystemClock.elapsedRealtime() - standaloneClockStartRealtimeMs).coerceAtLeast(0L)
+            return standaloneClockBasePositionMs + elapsed
+        }
 
-        return if (audioConfig.uri != null && audioConfig.effectiveAudioDurationMs > 0L) {
-            if (audioPos < audioConfig.effectiveAudioDurationMs - 50L) {
-                audioPos
-            } else {
-                maxOf(videoPos, audioPos)
-            }
+        return if (hasAnyVideoMedia()) {
+            maxOf(standaloneClockBasePositionMs, getRawVideoPositionMs())
         } else {
-            videoPos
+            standaloneClockBasePositionMs
         }
     }
 

@@ -1,6 +1,7 @@
 package com.muzrc.klipsync.media
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -10,6 +11,58 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class MediaMetadataReader(private val context: Context) {
+
+    suspend fun readMediaClip(uri: Uri): VideoClip = withContext(Dispatchers.IO) {
+        val mime = context.contentResolver.getType(uri) ?: ""
+        val lowerPath = uri.toString().lowercase()
+        val isImg = mime.startsWith("image/") ||
+            lowerPath.endsWith(".jpg") ||
+            lowerPath.endsWith(".jpeg") ||
+            lowerPath.endsWith(".png") ||
+            lowerPath.endsWith(".webp")
+
+        if (isImg) {
+            readImageClip(uri, mime.ifBlank { "image/jpeg" })
+        } else {
+            readVideoClip(uri)
+        }
+    }
+
+    suspend fun readImageClip(
+        uri: Uri,
+        detectedMime: String = "image/jpeg"
+    ): VideoClip = withContext(Dispatchers.IO) {
+        val displayName = resolveDisplayName(uri) ?: "Gambar_${System.currentTimeMillis()}.jpg"
+        var width = 1080
+        var height = 1920
+
+        try {
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, options)
+            }
+            if (options.outWidth > 0 && options.outHeight > 0) {
+                width = options.outWidth
+                height = options.outHeight
+            }
+        } catch (_: Exception) {
+        }
+
+        val defaultImageDurationMs = 4000L
+        VideoClip(
+            uri = uri,
+            displayName = displayName,
+            originalDurationMs = defaultImageDurationMs,
+            trimStartMs = 0L,
+            trimEndMs = defaultImageDurationMs,
+            width = width,
+            height = height,
+            isImage = true,
+            mimeType = detectedMime
+        )
+    }
 
     suspend fun readVideoClip(uri: Uri): VideoClip = withContext(Dispatchers.IO) {
         val displayName = resolveDisplayName(uri) ?: "Video_${System.currentTimeMillis()}.mp4"
@@ -44,7 +97,6 @@ class MediaMetadataReader(private val context: Context) {
                 height = rawHeight
             }
         } catch (_: Exception) {
-            // Kekalkan nilai lalai jika metadata gagal dibaca
         } finally {
             try {
                 retriever.release()
@@ -59,7 +111,9 @@ class MediaMetadataReader(private val context: Context) {
             trimStartMs = 0L,
             trimEndMs = durationMs,
             width = width,
-            height = height
+            height = height,
+            isImage = false,
+            mimeType = "video/mp4"
         )
     }
 
@@ -83,7 +137,6 @@ class MediaMetadataReader(private val context: Context) {
                 MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLongOrNull() ?: 0L
         } catch (_: Exception) {
-            // Kekalkan nilai lalai jika metadata gagal dibaca
         } finally {
             try {
                 retriever.release()

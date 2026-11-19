@@ -15,13 +15,16 @@ data class VideoClip(
     val rotationDegrees: Int = 0,
     val isMirrored: Boolean = false,
     val width: Int = 1080,
-    val height: Int = 1920
+    val height: Int = 1920,
+    val isImage: Boolean = false,
+    val mimeType: String? = null
 ) {
     val rawTrimmedDurationMs: Long
         get() = (trimEndMs - trimStartMs).coerceAtLeast(0L)
 
     val singlePlayDurationMs: Long
         get() {
+            if (isImage) return rawTrimmedDurationMs
             val safeSpeed = speed.coerceIn(0.25f, 4.0f)
             return (rawTrimmedDurationMs / safeSpeed).toLong().coerceAtLeast(0L)
         }
