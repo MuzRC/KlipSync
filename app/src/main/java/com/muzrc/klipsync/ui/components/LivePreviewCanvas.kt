@@ -78,11 +78,22 @@ fun LivePreviewCanvas(
     val activeImageBitmap = remember(activeClip?.id, activeClip?.uri, activeClip?.isImage) {
         if (activeClip == null || !activeClip.isImage) return@remember null
         try {
-            val opts = BitmapFactory.Options().apply { inSampleSize = 1 }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(activeClip.uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, bounds)
+            }
+            var sample = 1
+            while ((bounds.outWidth / sample) > 960 || (bounds.outHeight / sample) > 960) {
+                sample *= 2
+            }
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+            }
             context.contentResolver.openInputStream(activeClip.uri)?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, opts)?.asImageBitmap()
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             null
         }
     }
