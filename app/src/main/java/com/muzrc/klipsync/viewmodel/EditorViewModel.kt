@@ -230,14 +230,18 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId) clip.copy(motionEffect = effect) else clip
             }
-            state.copy(clips = updatedClips)
+            val updated = state.copy(clips = updatedClips)
+            syncPreviewWithState(updated)
+            updated
         }
     }
 
     fun applyMotionEffectToAllClips(effect: CameraMotionEffect) {
         _uiState.update { state ->
             val updatedClips = state.clips.map { it.copy(motionEffect = effect) }
-            state.copy(clips = updatedClips)
+            val updated = state.copy(clips = updatedClips)
+            syncPreviewWithState(updated)
+            updated
         }
     }
 
@@ -276,7 +280,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     clip
                 }
             }
-            state.copy(clips = updatedClips)
+            val updated = state.copy(clips = updatedClips)
+            syncPreviewWithState(updated)
+            updated
         }
     }
 
@@ -285,7 +291,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId) clip.copy(isMirrored = !clip.isMirrored) else clip
             }
-            state.copy(clips = updatedClips)
+            val updated = state.copy(clips = updatedClips)
+            syncPreviewWithState(updated)
+            updated
         }
     }
 
