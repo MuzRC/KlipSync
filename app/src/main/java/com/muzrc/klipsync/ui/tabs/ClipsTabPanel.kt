@@ -74,7 +74,8 @@ fun ClipsTabPanel(
     onRotateClip: (String) -> Unit,
     onMirrorClip: (String) -> Unit,
     onMotionEffectChange: (String, CameraMotionEffect) -> Unit,
-    onApplyMotionToAll: (CameraMotionEffect) -> Unit,
+    onMotionIntensityChange: (String, Float) -> Unit,
+    onApplyMotionToAll: (CameraMotionEffect, Float) -> Unit,
     onJoinModeChange: (JoinMode) -> Unit,
     onTransitionTypeChange: (TransitionType) -> Unit,
     onTransitionDurationChange: (Long) -> Unit,
@@ -330,7 +331,7 @@ fun ClipsTabPanel(
                         )
                         if (clips.size > 1) {
                             TextButton(
-                                onClick = { onApplyMotionToAll(clip.motionEffect) },
+                                onClick = { onApplyMotionToAll(clip.motionEffect, clip.motionIntensity) },
                                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
                             ) {
                                 Text("Guna Semua", fontSize = 11.sp)
@@ -349,6 +350,27 @@ fun ClipsTabPanel(
                                 label = { Text(motion.label, fontSize = 11.sp) }
                             )
                         }
+                    }
+
+                    if (clip.motionEffect != CameraMotionEffect.NONE) {
+                        val pct = (clip.motionIntensity * 100).toInt()
+                        val amountLabel = when (clip.motionEffect) {
+                            CameraMotionEffect.ZOOM_IN -> "Tahap Zoom In: +$pct% (1.00x → ${String.format(Locale.US, "%.2fx", 1.0f + clip.motionIntensity)})"
+                            CameraMotionEffect.ZOOM_OUT -> "Tahap Zoom Out: -$pct% (${String.format(Locale.US, "%.2fx", 1.0f + clip.motionIntensity)} → 1.00x)"
+                            CameraMotionEffect.PAN_LEFT,
+                            CameraMotionEffect.PAN_RIGHT -> "Jarak Gerakan Pan: $pct%"
+                            else -> ""
+                        }
+                        Text(
+                            text = amountLabel,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Slider(
+                            value = clip.motionIntensity,
+                            onValueChange = { onMotionIntensityChange(clip.id, it) },
+                            valueRange = 0.05f..0.50f
+                        )
                     }
 
                     FlowRow(
