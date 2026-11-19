@@ -16,8 +16,7 @@ object CropEffectBuilder {
         scaleMode: CropScaleMode,
         exportConfig: ExportConfig
     ): List<Effect> {
-        val effects = mutableListOf<Effect>()
-        val shortEdge = exportConfig.resolution.shortEdgePx
+        val shortEdge = ((exportConfig.resolution.shortEdgePx / 2) * 2).coerceAtLeast(360)
 
         val layoutStrategy = when (scaleMode) {
             CropScaleMode.FILL_CROP -> Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
@@ -26,22 +25,24 @@ object CropEffectBuilder {
 
         val targetRatio = aspectRatio.aspectRatioFloat
         if (targetRatio != null && targetRatio > 0f) {
-            effects.add(
-                Presentation.createForAspectRatio(
-                    targetRatio,
+            val targetWidth: Int
+            val targetHeight: Int
+            if (targetRatio >= 1f) {
+                targetHeight = shortEdge
+                targetWidth = (((shortEdge * targetRatio).roundToInt() / 2) * 2).coerceAtLeast(360)
+            } else {
+                targetWidth = shortEdge
+                targetHeight = (((shortEdge / targetRatio).roundToInt() / 2) * 2).coerceAtLeast(360)
+            }
+            return listOf(
+                Presentation.createForWidthAndHeight(
+                    targetWidth,
+                    targetHeight,
                     layoutStrategy
                 )
             )
-            val targetHeight = if (targetRatio >= 1f) {
-                shortEdge
-            } else {
-                (shortEdge / targetRatio).roundToInt()
-            }
-            effects.add(Presentation.createForHeight(targetHeight))
-        } else {
-            effects.add(Presentation.createForHeight(shortEdge))
         }
 
-        return effects
+        return listOf(Presentation.createForHeight(shortEdge))
     }
 }

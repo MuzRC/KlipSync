@@ -85,11 +85,13 @@ class VideoExporter(private val context: Context) {
                 sequences.add(musicSequence)
             }
 
-            val hasAnyAudio = musicSequence != null ||
-                (!safeState.audioConfig.isOriginalAudioMuted && safeState.clips.any { !it.isImage })
+            val hasOriginalVideoAudio = !safeState.audioConfig.isOriginalAudioMuted &&
+                safeState.clips.any { !it.isImage }
+            // ForceAudioTrack hanya diperlukan jika tiada muzik latar tetapi ada klip video dengan audio asal
+            val shouldForceAudioTrack = (musicSequence == null && hasOriginalVideoAudio)
 
             val composition = Composition.Builder(sequences)
-                .experimentalSetForceAudioTrack(hasAnyAudio)
+                .experimentalSetForceAudioTrack(shouldForceAudioTrack)
                 .build()
 
             val targetBitrate = if (shortEdge >= 1080) 5_500_000 else 3_200_000
@@ -232,8 +234,19 @@ class VideoExporter(private val context: Context) {
                 if (err is OutOfMemoryError || err?.cause is OutOfMemoryError) {
                     send(ExportState.Error("Memori telefon tidak mencukupi untuk resolusi ini. Sila pilih 720p HD dan cuba semula."))
                 } else {
-                    val detail = err?.localizedMessage ?: err?.javaClass?.simpleName ?: "Ralat tidak diketahui"
-                    send(ExportState.Error("Eksport gagal: $detail"))
+                    val targetErr = err?.cause ?: err
+                    val msg = targetErr?.localizedMessage?.takeIf { it.isNotBlank() }
+                        ?: targetErr?.javaClass?.simpleName
+                        ?: "Ralat tidak diketahui"
+                    val topFrame = targetErr?.stackTrace?.firstOrNull { frame ->
+                        frame.className.contains("klipsync") || frame.className.contains("media3")
+                    } ?: targetErr?.stackTrace?.firstOrNull()
+                    val location = if (topFrame != null) {
+                        " (${topFrame.className.substringAfterLast('.')}.${topFrame.methodName}:${topFrame.lineNumber})"
+                    } else {
+                        ""
+                    }
+                    send(ExportState.Error("Eksport gagal: $msg$location"))
                 }
             }
         } catch (_: OutOfMemoryError) {
