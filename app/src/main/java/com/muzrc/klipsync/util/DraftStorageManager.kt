@@ -22,6 +22,8 @@ import com.muzrc.klipsync.model.VideoEndBehavior
 import com.muzrc.klipsync.model.WatermarkConfig
 import com.muzrc.klipsync.model.WatermarkPosition
 import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -42,6 +44,12 @@ object DraftStorageManager {
         return dir
     }
 
+    private fun getDraftMediaDir(context: Context): File {
+        val dir = File(context.filesDir, "klipsync_draft_media")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
     fun takePersistablePermissionIfPossible(context: Context, uri: Uri) {
         try {
             context.contentResolver.takePersistableUriPermission(
@@ -49,6 +57,59 @@ object DraftStorageManager {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Menyalin fail media (video, gambar, audio, logo) ke storan dalaman aplikasi
+     * supaya draf kekal boleh dimainkan walaupun aplikasi ditutup dan dibuka semula.
+     */
+    private fun persistUriToLocalMedia(
+        context: Context,
+        uri: Uri,
+        fallbackExt: String
+    ): Uri {
+        if (uri.scheme == "file") {
+            val existing = uri.path?.let { File(it) }
+            if (existing != null && existing.exists()) return uri
+        }
+
+        val mediaDir = getDraftMediaDir(context)
+        val hashKey = sha256Short(uri.toString())
+        val safeExt = fallbackExt.trimStart('.').ifBlank { "bin" }
+        val targetFile = File(mediaDir, "media_${hashKey}.$safeExt")
+
+        if (targetFile.exists() && targetFile.length() > 0L) {
+            return Uri.fromFile(targetFile)
+        }
+
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(targetFile).use { output ->
+                    input.copyTo(output, bufferSize = 64 * 1024)
+                }
+            }
+            if (targetFile.exists() && targetFile.length() > 0L) {
+                Uri.fromFile(targetFile)
+            } else {
+                uri
+            }
+        } catch (_: Exception) {
+            uri
+        }
+    }
+
+    private fun sha256Short(text: String): String {
+        val bytes = MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
+        return bytes.take(10).joinToString("") { "%02x".format(it) }
+    }
+
+    private fun guessExtension(displayName: String, defaultExt: String): String {
+        val ext = displayName.substringAfterLast('.', "")
+        return if (ext.length in 2..5 && ext.all { it.isLetterOrDigit() }) {
+            ext.lowercase()
+        } else {
+            defaultExt
         }
     }
 
@@ -84,9 +145,13 @@ object DraftStorageManager {
             val clipsArr = JSONArray()
             state.clips.forEach { clip ->
                 takePersistablePermissionIfPossible(context, clip.uri)
+                val defaultExt = if (clip.isImage) "jpg" else "mp4"
+                val ext = guessExtension(clip.displayName, defaultExt)
+                val localUri = persistUriToLocalMedia(context, clip.uri, ext)
+
                 clipsArr.put(JSONObject().apply {
                     put("id", clip.id)
-                    put("uri", clip.uri.toString())
+                    put("uri", localUri.toString())
                     put("displayName", clip.displayName)
                     put("originalDurationMs", clip.originalDurationMs)
                     put("trimStartMs", clip.trimStartMs)
@@ -106,9 +171,14 @@ object DraftStorageManager {
             put("clips", clipsArr)
 
             val audio = state.audioConfig
-            audio.uri?.let { takePersistablePermissionIfPossible(context, it) }
+            val persistedAudioUri = audio.uri?.let { srcUri ->
+                takePersistablePermissionIfPossible(context, srcUri)
+                val defaultExt = if (audio.isExtractedFromVideo) "mp4" else "mp3"
+                val ext = guessExtension(audio.displayName, defaultExt)
+                persistUriToLocalMedia(context, srcUri, ext)
+            }
             put("audio", JSONObject().apply {
-                put("uri", audio.uri?.toString() ?: "")
+                put("uri", persistedAudioUri?.toString() ?: "")
                 put("displayName", audio.displayName)
                 put("isExtractedFromVideo", audio.isExtractedFromVideo)
                 put("totalDurationMs", audio.totalDurationMs)
@@ -140,9 +210,13 @@ object DraftStorageManager {
             put("subtitles", subsArr)
 
             val wm = state.watermarkConfig
-            wm.uri?.let { takePersistablePermissionIfPossible(context, it) }
+            val persistedWmUri = wm.uri?.let { srcUri ->
+                takePersistablePermissionIfPossible(context, srcUri)
+                val ext = guessExtension(wm.displayName, "png")
+                persistUriToLocalMedia(context, srcUri, ext)
+            }
             put("watermark", JSONObject().apply {
-                put("uri", wm.uri?.toString() ?: "")
+                put("uri", persistedWmUri?.toString() ?: "")
                 put("displayName", wm.displayName)
                 put("scalePercent", wm.scalePercent.toDouble())
                 put("opacity", wm.opacity.toDouble())
