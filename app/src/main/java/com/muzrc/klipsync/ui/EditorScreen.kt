@@ -66,13 +66,14 @@ fun EditorScreen(viewModel: EditorViewModel) {
                 .padding(innerPadding)
                 .navigationBarsPadding()
         ) {
-            // Zon 1: Pemain Pratonton Langsung
             LivePreviewCanvas(
                 videoPlayer = viewModel.playerController.videoPlayer,
                 hasClips = state.clips.isNotEmpty(),
                 aspectRatio = state.aspectRatio,
                 subtitles = state.subtitles,
                 currentPositionMs = state.currentPositionMs,
+                totalVideoDurationMs = state.totalVideoDurationMs,
+                freezeFrameExtensionMs = state.freezeFrameExtensionMs,
                 isInFreezeFrameZone = isInFreezeFrameZone,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -89,7 +90,6 @@ fun EditorScreen(viewModel: EditorViewModel) {
 
             HorizontalDivider()
 
-            // Zon 2: Garis Masa Multi-Trek
             MultiTrackTimeline(
                 clips = state.clips,
                 audioConfig = state.audioConfig,
@@ -100,7 +100,6 @@ fun EditorScreen(viewModel: EditorViewModel) {
 
             HorizontalDivider()
 
-            // Zon 3: Tab Kawalan Penyuntingan
             EditorTabBar(
                 activeTab = state.activeTab,
                 onSelectTab = { viewModel.selectTab(it) }

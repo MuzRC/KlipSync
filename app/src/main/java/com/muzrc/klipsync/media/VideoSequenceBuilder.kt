@@ -80,7 +80,6 @@ class VideoSequenceBuilder(private val context: Context) {
         val hasFreezeFrame = transitionConfig.endBehavior == VideoEndBehavior.FREEZE_FRAME &&
             freezeFrameExtensionMs > 0L
 
-        // Jika ada freeze frame (imej tanpa trek audio), pastikan trek video juga konsisten
         val removeOriginalAudio = audioConfig.isOriginalAudioMuted ||
             audioConfig.originalVideoVolume <= 0.01f
 
@@ -185,7 +184,7 @@ class VideoSequenceBuilder(private val context: Context) {
             editedItems.add(editedClip)
         }
 
-        // Freeze frame dengan MimeTypes.IMAGE_PNG supaya Media3 guna ImageAssetLoader
+        // Freeze frame dengan kesan Slow Zoom (Ken Burns) supaya visual tidak kaku
         if (hasFreezeFrame) {
             val lastClip = finalClipChain.last()
             val freezeUri = extractLastFrameToTempFile(lastClip)
@@ -196,10 +195,14 @@ class VideoSequenceBuilder(private val context: Context) {
                     .setImageDurationMs(freezeFrameExtensionMs)
                     .build()
 
+                val freezeEffects = mutableListOf<Effect>()
+                freezeEffects.addAll(baseVideoEffects)
+                freezeEffects.add(createSlowZoomEffect(freezeFrameExtensionMs * 1000L))
+
                 val freezeEditedItem = EditedMediaItem.Builder(imageItem)
                     .setRemoveAudio(true)
                     .setFrameRate(exportConfig.frameRate.fps)
-                    .setEffects(Effects(emptyList(), baseVideoEffects))
+                    .setEffects(Effects(emptyList(), freezeEffects))
                     .build()
 
                 editedItems.add(freezeEditedItem)
@@ -207,6 +210,20 @@ class VideoSequenceBuilder(private val context: Context) {
         }
 
         return EditedMediaItemSequence(editedItems)
+    }
+
+    private fun createSlowZoomEffect(totalDurationUs: Long): MatrixTransformation {
+        return MatrixTransformation { presentationTimeUs ->
+            val matrix = Matrix()
+            if (totalDurationUs > 0L) {
+                val progress = (presentationTimeUs.toFloat() / totalDurationUs.toFloat())
+                    .coerceIn(0f, 1f)
+                // Zum masuk secara perlahan dari 1.00x ke 1.12x
+                val scale = 1.0f + (0.12f * progress)
+                matrix.postScale(scale, scale)
+            }
+            matrix
+        }
     }
 
     private fun createFadeEffect(

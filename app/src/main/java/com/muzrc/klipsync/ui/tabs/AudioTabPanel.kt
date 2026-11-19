@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.muzrc.klipsync.model.AudioTrackConfig
 import com.muzrc.klipsync.util.TimeFormatter
 
@@ -67,7 +69,6 @@ fun AudioTabPanel(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Pemilih Fail Lagu
         Button(
             onClick = { audioPicker.launch("audio/*") },
             modifier = Modifier.fillMaxWidth()
@@ -80,7 +81,6 @@ fun AudioTabPanel(
             )
         }
 
-        // Kawalan Lagu Terpilih
         if (audioConfig.uri != null) {
             Card(
                 colors = CardDefaults.cardColors(
@@ -115,9 +115,9 @@ fun AudioTabPanel(
                         }
                     }
 
-                    // Slider Mula Lagu
+                    // Slider Mula Lagu + Butang Fine-Tune Beat
                     Text(
-                        text = "Lagu Bermula Pada Saat: ${TimeFormatter.formatDurationMs(audioConfig.startOffsetMs)} / ${TimeFormatter.formatDurationMs(audioConfig.totalDurationMs)}",
+                        text = "Mula Lagu: ${TimeFormatter.formatPreciseMs(audioConfig.startOffsetMs)} / ${TimeFormatter.formatDurationMs(audioConfig.totalDurationMs)}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -129,7 +129,22 @@ fun AudioTabPanel(
                         valueRange = 0f..maxOffset
                     )
 
-                    // Kelantangan Lagu
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val nudges = listOf(-500L to "-0.5s", -100L to "-0.1s", 100L to "+0.1s", 500L to "+0.5s")
+                        nudges.forEach { (deltaMs, label) ->
+                            OutlinedButton(
+                                onClick = { onStartOffsetChange(audioConfig.startOffsetMs + deltaMs) },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(text = label, fontSize = 11.sp)
+                            }
+                        }
+                    }
+
                     Text(
                         text = "Kelantangan Lagu: ${(audioConfig.musicVolume * 100).toInt()}%",
                         style = MaterialTheme.typography.labelMedium
@@ -140,7 +155,6 @@ fun AudioTabPanel(
                         valueRange = 0f..1f
                     )
 
-                    // Kesan Fade In
                     Text(
                         text = "Kesan Fade In (Masuk Lembut)",
                         style = MaterialTheme.typography.labelMedium,
@@ -156,7 +170,6 @@ fun AudioTabPanel(
                         }
                     }
 
-                    // Kesan Fade Out
                     Text(
                         text = "Kesan Fade Out (Tamat Lembut)",
                         style = MaterialTheme.typography.labelMedium,
@@ -175,7 +188,6 @@ fun AudioTabPanel(
             }
         }
 
-        // Kawalan Audio Asal Video (Mute / Campur)
         Card(
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface

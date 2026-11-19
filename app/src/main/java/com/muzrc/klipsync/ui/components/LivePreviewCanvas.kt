@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +44,8 @@ fun LivePreviewCanvas(
     aspectRatio: AspectRatioPreset,
     subtitles: List<SubtitleItem>,
     currentPositionMs: Long,
+    totalVideoDurationMs: Long,
+    freezeFrameExtensionMs: Long,
     isInFreezeFrameZone: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -79,6 +82,15 @@ fun LivePreviewCanvas(
             Modifier.fillMaxSize()
         }
 
+        // Kira skala Slow Zoom masa nyata semasa berada dalam zon Freeze Frame
+        val freezeZoomScale = if (isInFreezeFrameZone && freezeFrameExtensionMs > 0L) {
+            val elapsed = (currentPositionMs - totalVideoDurationMs).coerceAtLeast(0L)
+            val progress = (elapsed.toFloat() / freezeFrameExtensionMs.toFloat()).coerceIn(0f, 1f)
+            1.0f + (0.12f * progress)
+        } else {
+            1.0f
+        }
+
         Box(
             modifier = frameModifier
                 .clip(RoundedCornerShape(8.dp))
@@ -105,13 +117,17 @@ fun LivePreviewCanvas(
                         AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     }
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = freezeZoomScale
+                        scaleY = freezeZoomScale
+                    }
             )
 
-            // Penunjuk Freeze Frame masa nyata
             if (isInFreezeFrameZone) {
                 Text(
-                    text = "FREEZE FRAME",
+                    text = "SLOW ZOOM",
                     color = Color.Black,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
@@ -123,7 +139,6 @@ fun LivePreviewCanvas(
                 )
             }
 
-            // Pratonton Sarikata Manual masa nyata
             val activeSubtitles = subtitles.filter {
                 currentPositionMs in it.startMs..it.endMs && it.text.isNotBlank()
             }
