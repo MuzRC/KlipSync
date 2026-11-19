@@ -100,6 +100,7 @@ object DraftStorageManager {
                     put("isImage", clip.isImage)
                     put("mimeType", clip.mimeType ?: "")
                     put("motionEffect", clip.motionEffect.name)
+                    put("motionIntensity", clip.motionIntensity.toDouble())
                 })
             }
             put("clips", clipsArr)
@@ -227,7 +228,8 @@ object DraftStorageManager {
                             height = c.optInt("height", 1920),
                             isImage = c.optBoolean("isImage", false),
                             mimeType = c.optString("mimeType").ifBlank { null },
-                            motionEffect = enumOrDefault(c.optString("motionEffect"), CameraMotionEffect.NONE)
+                            motionEffect = enumOrDefault(c.optString("motionEffect"), CameraMotionEffect.NONE),
+                            motionIntensity = c.optDouble("motionIntensity", 0.20).toFloat()
                         )
                     )
                 }
