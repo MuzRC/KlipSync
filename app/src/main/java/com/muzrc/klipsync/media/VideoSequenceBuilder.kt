@@ -7,9 +7,10 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.MatrixTransformation
-import androidx.media3.effect.RgbFilter
+import androidx.media3.effect.RgbMatrix
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
@@ -21,6 +22,7 @@ import com.muzrc.klipsync.model.SubtitleItem
 import com.muzrc.klipsync.model.TransitionConfig
 import com.muzrc.klipsync.model.TransitionType
 import com.muzrc.klipsync.model.VideoClip
+import com.muzrc.klipsync.model.VideoEndBehavior
 import java.io.File
 import java.io.FileOutputStream
 
@@ -34,9 +36,37 @@ class VideoSequenceBuilder(private val context: Context) {
         aspectRatio: AspectRatioPreset,
         subtitles: List<SubtitleItem>,
         exportConfig: ExportConfig,
-        freezeFrameExtensionMs: Long
+        freezeFrameExtensionMs: Long,
+        autoLoopExtensionMs: Long
     ): EditedMediaItemSequence? {
         if (clips.isEmpty()) return null
+
+        val baseExpandedClips = clips.flatMap { clip ->
+            List(clip.loopCount.coerceAtLeast(1)) { clip }
+        }
+
+        val finalClipChain = mutableListOf<VideoClip>()
+        val targetMinDurationMs = if (
+            transitionConfig.endBehavior == VideoEndBehavior.LOOP_TO_AUDIO &&
+            autoLoopExtensionMs > 0L
+        ) {
+            audioConfig.effectiveAudioDurationMs
+        } else {
+            0L
+        }
+
+        var accumulatedMs = 0L
+        var safetyIterations = 0
+        do {
+            for (clip in baseExpandedClips) {
+                finalClipChain.add(clip)
+                accumulatedMs += clip.singlePlayDurationMs
+                if (targetMinDurationMs > 0L && accumulatedMs >= targetMinDurationMs) {
+                    break
+                }
+            }
+            safetyIterations++
+        } while (targetMinDurationMs > 0L && accumulatedMs < targetMinDurationMs && safetyIterations < 100)
 
         val editedItems = mutableListOf<EditedMediaItem>()
         val baseVideoEffects = mutableListOf<Effect>()
@@ -47,18 +77,24 @@ class VideoSequenceBuilder(private val context: Context) {
             baseVideoEffects.add(it)
         }
 
+        val hasFreezeFrame = transitionConfig.endBehavior == VideoEndBehavior.FREEZE_FRAME &&
+            freezeFrameExtensionMs > 0L
+
+        // Jika ada freeze frame (imej tanpa trek audio), pastikan trek video juga konsisten
         val removeOriginalAudio = audioConfig.isOriginalAudioMuted ||
             audioConfig.originalVideoVolume <= 0.01f
 
-        val overlapHalfMs = if (transitionConfig.joinMode == JoinMode.OVERLAP && clips.size > 1) {
+        val overlapHalfMs = if (transitionConfig.joinMode == JoinMode.OVERLAP && finalClipChain.size > 1) {
             (transitionConfig.durationMs / 2L).coerceAtLeast(0L)
         } else {
             0L
         }
 
-        clips.forEachIndexed { index, clip ->
+        var runningDurationMs = 0L
+
+        finalClipChain.forEachIndexed { index, clip ->
             val isFirst = index == 0
-            val isLast = index == clips.lastIndex
+            val isLast = index == finalClipChain.lastIndex
 
             val adjustedStart = if (!isFirst) {
                 (clip.trimStartMs + overlapHalfMs).coerceAtMost(clip.trimEndMs)
@@ -66,13 +102,19 @@ class VideoSequenceBuilder(private val context: Context) {
                 clip.trimStartMs
             }
 
-            val adjustedEnd = if (!isLast) {
+            var adjustedEnd = if (!isLast) {
                 (clip.trimEndMs - overlapHalfMs).coerceAtLeast(adjustedStart)
             } else {
                 clip.trimEndMs
             }
 
+            if (targetMinDurationMs > 0L && runningDurationMs + (adjustedEnd - adjustedStart) > targetMinDurationMs) {
+                val needed = (targetMinDurationMs - runningDurationMs).coerceAtLeast(100L)
+                adjustedEnd = (adjustedStart + needed).coerceAtMost(clip.trimEndMs)
+            }
+
             val clipDurationMs = (adjustedEnd - adjustedStart).coerceAtLeast(100L)
+            runningDurationMs += clipDurationMs
 
             val clipping = MediaItem.ClippingConfiguration.Builder()
                 .setStartPositionMs(adjustedStart)
@@ -87,8 +129,7 @@ class VideoSequenceBuilder(private val context: Context) {
             val clipVideoEffects = mutableListOf<Effect>()
             clipVideoEffects.addAll(baseVideoEffects)
 
-            // Tambah kesan transisi di antara klip
-            if (clips.size > 1 && transitionConfig.transitionType != TransitionType.NONE) {
+            if (finalClipChain.size > 1 && transitionConfig.transitionType != TransitionType.NONE) {
                 val transDurationUs = (transitionConfig.durationMs.coerceAtMost(clipDurationMs / 2L)) * 1000L
                 val clipDurationUs = clipDurationMs * 1000L
 
@@ -144,17 +185,19 @@ class VideoSequenceBuilder(private val context: Context) {
             editedItems.add(editedClip)
         }
 
-        // Freeze frame jika audio lebih panjang daripada jumlah video
-        if (freezeFrameExtensionMs > 0L) {
-            val lastClip = clips.last()
+        // Freeze frame dengan MimeTypes.IMAGE_PNG supaya Media3 guna ImageAssetLoader
+        if (hasFreezeFrame) {
+            val lastClip = finalClipChain.last()
             val freezeUri = extractLastFrameToTempFile(lastClip)
             if (freezeUri != null) {
                 val imageItem = MediaItem.Builder()
                     .setUri(freezeUri)
+                    .setMimeType(MimeTypes.IMAGE_PNG)
                     .setImageDurationMs(freezeFrameExtensionMs)
                     .build()
 
                 val freezeEditedItem = EditedMediaItem.Builder(imageItem)
+                    .setRemoveAudio(true)
                     .setFrameRate(exportConfig.frameRate.fps)
                     .setEffects(Effects(emptyList(), baseVideoEffects))
                     .build()
@@ -171,23 +214,21 @@ class VideoSequenceBuilder(private val context: Context) {
         endUs: Long,
         fadeIn: Boolean
     ): Effect {
-        return RgbFilter.createGrayscaleFilter().let {
-            object : androidx.media3.effect.RgbMatrix {
-                override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
-                    val progress = if (endUs > startUs) {
-                        ((presentationTimeUs - startUs).toFloat() / (endUs - startUs).toFloat())
-                            .coerceIn(0f, 1f)
-                    } else {
-                        1f
-                    }
-                    val brightness = if (fadeIn) progress else (1f - progress)
-                    return floatArrayOf(
-                        brightness, 0f, 0f, 0f,
-                        0f, brightness, 0f, 0f,
-                        0f, 0f, brightness, 0f,
-                        0f, 0f, 0f, 1f
-                    )
+        return object : RgbMatrix {
+            override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
+                val progress = if (endUs > startUs) {
+                    ((presentationTimeUs - startUs).toFloat() / (endUs - startUs).toFloat())
+                        .coerceIn(0f, 1f)
+                } else {
+                    1f
                 }
+                val brightness = if (fadeIn) progress else (1f - progress)
+                return floatArrayOf(
+                    brightness, 0f, 0f, 0f,
+                    0f, brightness, 0f, 0f,
+                    0f, 0f, brightness, 0f,
+                    0f, 0f, 0f, 1f
+                )
             }
         }
     }

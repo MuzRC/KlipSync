@@ -44,7 +44,8 @@ class VideoExporter(private val context: Context) {
             aspectRatio = state.aspectRatio,
             subtitles = state.subtitles,
             exportConfig = state.exportConfig,
-            freezeFrameExtensionMs = state.freezeFrameExtensionMs
+            freezeFrameExtensionMs = state.freezeFrameExtensionMs,
+            autoLoopExtensionMs = state.autoLoopExtensionMs
         )
 
         if (videoSequence == null) {
@@ -58,7 +59,10 @@ class VideoExporter(private val context: Context) {
             sequences.add(musicSequence)
         }
 
-        val composition = Composition.Builder(sequences).build()
+        val composition = Composition.Builder(sequences)
+            .experimentalSetForceAudioTrack(musicSequence != null || !state.audioConfig.isOriginalAudioMuted)
+            .build()
+
         val tempOutputFile = File(
             context.cacheDir,
             "klipsync_export_${System.currentTimeMillis()}.mp4"
