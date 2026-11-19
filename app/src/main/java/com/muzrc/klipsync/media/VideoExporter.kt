@@ -40,9 +40,12 @@ class VideoExporter(private val context: Context) {
         val videoSequence = videoBuilder.buildVideoSequence(
             clips = state.clips,
             transitionConfig = state.transitionConfig,
+            colorConfig = state.colorConfig,
             audioConfig = state.audioConfig,
             aspectRatio = state.aspectRatio,
+            cropScaleMode = state.cropScaleMode,
             subtitles = state.subtitles,
+            watermarkConfig = state.watermarkConfig,
             exportConfig = state.exportConfig,
             freezeFrameExtensionMs = state.freezeFrameExtensionMs,
             autoLoopExtensionMs = state.autoLoopExtensionMs

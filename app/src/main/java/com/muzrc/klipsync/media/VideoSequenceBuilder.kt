@@ -8,14 +8,18 @@ import android.net.Uri
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.MatrixTransformation
 import androidx.media3.effect.RgbMatrix
+import androidx.media3.effect.ScaleAndRotateTransformation
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import com.muzrc.klipsync.model.AspectRatioPreset
 import com.muzrc.klipsync.model.AudioTrackConfig
+import com.muzrc.klipsync.model.ColorFilterConfig
+import com.muzrc.klipsync.model.CropScaleMode
 import com.muzrc.klipsync.model.ExportConfig
 import com.muzrc.klipsync.model.JoinMode
 import com.muzrc.klipsync.model.SubtitleItem
@@ -23,6 +27,7 @@ import com.muzrc.klipsync.model.TransitionConfig
 import com.muzrc.klipsync.model.TransitionType
 import com.muzrc.klipsync.model.VideoClip
 import com.muzrc.klipsync.model.VideoEndBehavior
+import com.muzrc.klipsync.model.WatermarkConfig
 import java.io.File
 import java.io.FileOutputStream
 
@@ -32,9 +37,12 @@ class VideoSequenceBuilder(private val context: Context) {
     fun buildVideoSequence(
         clips: List<VideoClip>,
         transitionConfig: TransitionConfig,
+        colorConfig: ColorFilterConfig,
         audioConfig: AudioTrackConfig,
         aspectRatio: AspectRatioPreset,
+        cropScaleMode: CropScaleMode,
         subtitles: List<SubtitleItem>,
+        watermarkConfig: WatermarkConfig,
         exportConfig: ExportConfig,
         freezeFrameExtensionMs: Long,
         autoLoopExtensionMs: Long
@@ -69,12 +77,20 @@ class VideoSequenceBuilder(private val context: Context) {
         } while (targetMinDurationMs > 0L && accumulatedMs < targetMinDurationMs && safetyIterations < 100)
 
         val editedItems = mutableListOf<EditedMediaItem>()
-        val baseVideoEffects = mutableListOf<Effect>()
-        baseVideoEffects.addAll(
-            CropEffectBuilder.buildCropAndScaleEffects(aspectRatio, exportConfig)
+
+        // Kesan global (Crop/Fit, Penapis Warna, Sarikata, Logo Watermark)
+        val globalPostEffects = mutableListOf<Effect>()
+        globalPostEffects.addAll(
+            CropEffectBuilder.buildCropAndScaleEffects(aspectRatio, cropScaleMode, exportConfig)
         )
+        ColorMatrixBuilder.buildColorEffect(colorConfig)?.let {
+            globalPostEffects.add(it)
+        }
         SubtitleOverlayBuilder.buildSubtitleEffect(subtitles)?.let {
-            baseVideoEffects.add(it)
+            globalPostEffects.add(it)
+        }
+        WatermarkOverlayBuilder.buildWatermarkEffect(context, watermarkConfig)?.let {
+            globalPostEffects.add(it)
         }
 
         val hasFreezeFrame = transitionConfig.endBehavior == VideoEndBehavior.FREEZE_FRAME &&
@@ -94,26 +110,29 @@ class VideoSequenceBuilder(private val context: Context) {
         finalClipChain.forEachIndexed { index, clip ->
             val isFirst = index == 0
             val isLast = index == finalClipChain.lastIndex
+            val safeSpeed = clip.speed.coerceIn(0.25f, 4.0f)
 
             val adjustedStart = if (!isFirst) {
-                (clip.trimStartMs + overlapHalfMs).coerceAtMost(clip.trimEndMs)
+                (clip.trimStartMs + (overlapHalfMs * safeSpeed).toLong()).coerceAtMost(clip.trimEndMs)
             } else {
                 clip.trimStartMs
             }
 
             var adjustedEnd = if (!isLast) {
-                (clip.trimEndMs - overlapHalfMs).coerceAtLeast(adjustedStart)
+                (clip.trimEndMs - (overlapHalfMs * safeSpeed).toLong()).coerceAtLeast(adjustedStart)
             } else {
                 clip.trimEndMs
             }
 
-            if (targetMinDurationMs > 0L && runningDurationMs + (adjustedEnd - adjustedStart) > targetMinDurationMs) {
-                val needed = (targetMinDurationMs - runningDurationMs).coerceAtLeast(100L)
-                adjustedEnd = (adjustedStart + needed).coerceAtMost(clip.trimEndMs)
+            val playedDurMs = ((adjustedEnd - adjustedStart) / safeSpeed).toLong().coerceAtLeast(100L)
+            if (targetMinDurationMs > 0L && runningDurationMs + playedDurMs > targetMinDurationMs) {
+                val neededPlayedMs = (targetMinDurationMs - runningDurationMs).coerceAtLeast(100L)
+                val neededRawMs = (neededPlayedMs * safeSpeed).toLong()
+                adjustedEnd = (adjustedStart + neededRawMs).coerceAtMost(clip.trimEndMs)
             }
 
-            val clipDurationMs = (adjustedEnd - adjustedStart).coerceAtLeast(100L)
-            runningDurationMs += clipDurationMs
+            val finalPlayedDurationMs = ((adjustedEnd - adjustedStart) / safeSpeed).toLong().coerceAtLeast(100L)
+            runningDurationMs += finalPlayedDurationMs
 
             val clipping = MediaItem.ClippingConfiguration.Builder()
                 .setStartPositionMs(adjustedStart)
@@ -126,22 +145,37 @@ class VideoSequenceBuilder(private val context: Context) {
                 .build()
 
             val clipVideoEffects = mutableListOf<Effect>()
-            clipVideoEffects.addAll(baseVideoEffects)
 
+            // 1. Putaran & Cermin (Rotate & Mirror Flip)
+            if (clip.rotationDegrees != 0 || clip.isMirrored) {
+                val scaleRotate = ScaleAndRotateTransformation.Builder()
+                    .setRotationDegrees(clip.rotationDegrees.toFloat())
+                    .setScale(if (clip.isMirrored) -1f else 1f, 1f)
+                    .build()
+                clipVideoEffects.add(scaleRotate)
+            }
+
+            // 2. Kelajuan Klip (Slow-Mo / Fast-Forward)
+            if (safeSpeed !in 0.99f..1.01f) {
+                clipVideoEffects.add(
+                    androidx.media3.effect.SpeedChangeEffect(safeSpeed)
+                )
+            }
+
+            // 3. Kesan Global (Crop, Color Filter, Lirik, Logo)
+            clipVideoEffects.addAll(globalPostEffects)
+
+            // 4. Transisi antara klip
             if (finalClipChain.size > 1 && transitionConfig.transitionType != TransitionType.NONE) {
-                val transDurationUs = (transitionConfig.durationMs.coerceAtMost(clipDurationMs / 2L)) * 1000L
-                val clipDurationUs = clipDurationMs * 1000L
+                val transDurationUs = (transitionConfig.durationMs.coerceAtMost(finalPlayedDurationMs / 2L)) * 1000L
+                val clipDurationUs = finalPlayedDurationMs * 1000L
 
                 when (transitionConfig.transitionType) {
                     TransitionType.CROSSFADE,
                     TransitionType.FADE_TO_BLACK -> {
                         if (!isFirst && transDurationUs > 0L) {
                             clipVideoEffects.add(
-                                createFadeEffect(
-                                    startUs = 0L,
-                                    endUs = transDurationUs,
-                                    fadeIn = true
-                                )
+                                createFadeEffect(startUs = 0L, endUs = transDurationUs, fadeIn = true)
                             )
                         }
                         if (!isLast && transDurationUs > 0L) {
@@ -165,14 +199,19 @@ class VideoSequenceBuilder(private val context: Context) {
                 }
             }
 
-            val audioProcessors = if (!removeOriginalAudio) {
-                listOf(
+            val audioProcessors = mutableListOf<androidx.media3.common.audio.AudioProcessor>()
+            if (!removeOriginalAudio) {
+                if (safeSpeed !in 0.99f..1.01f) {
+                    val sonic = SonicAudioProcessor().apply {
+                        setSpeed(safeSpeed)
+                    }
+                    audioProcessors.add(sonic)
+                }
+                audioProcessors.add(
                     AudioSequenceBuilder.createConstantVolumeProcessor(
                         audioConfig.originalVideoVolume
                     )
                 )
-            } else {
-                emptyList()
             }
 
             val editedClip = EditedMediaItem.Builder(mediaItem)
@@ -184,7 +223,7 @@ class VideoSequenceBuilder(private val context: Context) {
             editedItems.add(editedClip)
         }
 
-        // Freeze frame dengan kesan Slow Zoom (Ken Burns) supaya visual tidak kaku
+        // Freeze frame dengan Slow Zoom
         if (hasFreezeFrame) {
             val lastClip = finalClipChain.last()
             val freezeUri = extractLastFrameToTempFile(lastClip)
@@ -196,7 +235,15 @@ class VideoSequenceBuilder(private val context: Context) {
                     .build()
 
                 val freezeEffects = mutableListOf<Effect>()
-                freezeEffects.addAll(baseVideoEffects)
+                if (lastClip.rotationDegrees != 0 || lastClip.isMirrored) {
+                    freezeEffects.add(
+                        ScaleAndRotateTransformation.Builder()
+                            .setRotationDegrees(lastClip.rotationDegrees.toFloat())
+                            .setScale(if (lastClip.isMirrored) -1f else 1f, 1f)
+                            .build()
+                    )
+                }
+                freezeEffects.addAll(globalPostEffects)
                 freezeEffects.add(createSlowZoomEffect(freezeFrameExtensionMs * 1000L))
 
                 val freezeEditedItem = EditedMediaItem.Builder(imageItem)
@@ -218,7 +265,6 @@ class VideoSequenceBuilder(private val context: Context) {
             if (totalDurationUs > 0L) {
                 val progress = (presentationTimeUs.toFloat() / totalDurationUs.toFloat())
                     .coerceIn(0f, 1f)
-                // Zum masuk secara perlahan dari 1.00x ke 1.12x
                 val scale = 1.0f + (0.12f * progress)
                 matrix.postScale(scale, scale)
             }
@@ -226,11 +272,7 @@ class VideoSequenceBuilder(private val context: Context) {
         }
     }
 
-    private fun createFadeEffect(
-        startUs: Long,
-        endUs: Long,
-        fadeIn: Boolean
-    ): Effect {
+    private fun createFadeEffect(startUs: Long, endUs: Long, fadeIn: Boolean): Effect {
         return object : RgbMatrix {
             override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
                 val progress = if (endUs > startUs) {

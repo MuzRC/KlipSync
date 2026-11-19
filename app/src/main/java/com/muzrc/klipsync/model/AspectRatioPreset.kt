@@ -1,5 +1,10 @@
 package com.muzrc.klipsync.model
 
+enum class CropScaleMode(val label: String) {
+    FILL_CROP("Penuh (Center Crop)"),
+    FIT_BLUR("Muat Penuh + Latar Kabur")
+}
+
 enum class AspectRatioPreset(
     val label: String,
     val ratioWidth: Int,
