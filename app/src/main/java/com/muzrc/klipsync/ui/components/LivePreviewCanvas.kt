@@ -47,6 +47,7 @@ import com.muzrc.klipsync.model.SubtitlePosition
 import com.muzrc.klipsync.model.VideoClip
 import com.muzrc.klipsync.model.WatermarkConfig
 import com.muzrc.klipsync.model.WatermarkPosition
+import com.muzrc.klipsync.preview.PreviewTransitionVisual
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -63,8 +64,7 @@ fun LivePreviewCanvas(
     totalVideoDurationMs: Long,
     freezeFrameExtensionMs: Long,
     isInFreezeFrameZone: Boolean,
-    transitionAlpha: Float = 1f,
-    transitionZoomScale: Float = 1f,
+    transitionVisual: PreviewTransitionVisual = PreviewTransitionVisual(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -123,7 +123,7 @@ fun LivePreviewCanvas(
 
         val rotDeg = (activeClip?.rotationDegrees ?: 0).toFloat()
         val mirrorScaleX = if (activeClip?.isMirrored == true) -1f else 1f
-        val combinedZoom = freezeZoomScale * transitionZoomScale
+        val combinedZoom = freezeZoomScale * transitionVisual.zoomScale
 
         val containerBg = if (cropScaleMode == CropScaleMode.FIT_BLUR) {
             Color(0xFF1A1E29)
@@ -177,12 +177,21 @@ fun LivePreviewCanvas(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        alpha = transitionAlpha
                         scaleX = combinedZoom * mirrorScaleX
                         scaleY = combinedZoom
                         rotationZ = rotDeg
+                        translationX = size.width * transitionVisual.slideOffsetXFraction
                     }
             )
+
+            // Lapisan gelapkan transisi di atas SurfaceView supaya Crossfade/Fade-to-Black sentiasa kelihatan
+            if (transitionVisual.blackOverlayAlpha > 0.01f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = transitionVisual.blackOverlayAlpha.coerceIn(0f, 1f)))
+                )
+            }
 
             if (watermarkBitmap != null) {
                 val wmAlign = when (watermarkConfig.position) {

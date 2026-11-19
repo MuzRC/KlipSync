@@ -55,7 +55,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
         state.currentPositionMs >= state.totalVideoDurationMs
 
     val currentPlayingClip = viewModel.playerController.currentActiveClip() ?: state.selectedClip
-    val (transAlpha, transZoom) = viewModel.playerController.computePreviewTransitionTransform(
+    val transitionVisual = viewModel.playerController.computePreviewTransitionVisual(
         positionMs = state.currentPositionMs,
         transitionType = state.transitionConfig.transitionType,
         transitionDurationMs = state.transitionConfig.durationMs
@@ -98,8 +98,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
                 totalVideoDurationMs = state.totalVideoDurationMs,
                 freezeFrameExtensionMs = state.freezeFrameExtensionMs,
                 isInFreezeFrameZone = isInFreezeFrameZone,
-                transitionAlpha = transAlpha,
-                transitionZoomScale = transZoom,
+                transitionVisual = transitionVisual,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(0.35f)

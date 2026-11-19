@@ -1,24 +1,34 @@
 package com.muzrc.klipsync.preview
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import com.muzrc.klipsync.model.AudioTrackConfig
 import com.muzrc.klipsync.model.JoinMode
 import com.muzrc.klipsync.model.TransitionConfig
+import com.muzrc.klipsync.model.TransitionType
 import com.muzrc.klipsync.model.VideoClip
 import com.muzrc.klipsync.model.VideoEndBehavior
 import kotlin.math.abs
+
+data class PreviewTransitionVisual(
+    val blackOverlayAlpha: Float = 0f,
+    val zoomScale: Float = 1f,
+    val slideOffsetXFraction: Float = 0f
+)
 
 @OptIn(UnstableApi::class)
 class PreviewPlayerController(context: Context) {
 
     val videoPlayer: ExoPlayer = ExoPlayer.Builder(context).build().apply {
         repeatMode = Player.REPEAT_MODE_OFF
+        setSeekParameters(SeekParameters.CLOSEST_SYNC)
     }
 
     val audioPlayer: ExoPlayer = ExoPlayer.Builder(context).build().apply {
@@ -32,6 +42,7 @@ class PreviewPlayerController(context: Context) {
     private var endBehavior: VideoEndBehavior = VideoEndBehavior.FREEZE_FRAME
     private var lastVideoSignature: String = ""
     private var lastAudioSignature: String = ""
+    private var lastDriftCorrectionRealtimeMs: Long = 0L
 
     fun syncMedia(
         clips: List<VideoClip>,
@@ -165,24 +176,24 @@ class PreviewPlayerController(context: Context) {
     }
 
     /**
-     * Mengira kemajuan transisi di sempadan klip (termasuk ulangan loop) untuk pratonton langsung.
-     * Pulangkan Pair(alpha, zoomScale)
+     * Mengira kesan visual transisi (fade gelap, zoom, slide) di sempadan klip & loop
+     * supaya boleh dirender dengan tepat di atas SurfaceView pratonton.
      */
-    fun computePreviewTransitionTransform(
+    fun computePreviewTransitionVisual(
         positionMs: Long,
-        transitionType: com.muzrc.klipsync.model.TransitionType,
+        transitionType: TransitionType,
         transitionDurationMs: Long
-    ): Pair<Float, Float> {
-        if (transitionType == com.muzrc.klipsync.model.TransitionType.NONE ||
+    ): PreviewTransitionVisual {
+        if (transitionType == TransitionType.NONE ||
             clipPlayedDurationsMs.isEmpty() ||
             totalVideoDurationMs <= 0L
         ) {
-            return 1f to 1f
+            return PreviewTransitionVisual()
         }
 
         val hasMultipleSegments = clipPlayedDurationsMs.size > 1 ||
             endBehavior == VideoEndBehavior.LOOP_TO_AUDIO
-        if (!hasMultipleSegments) return 1f to 1f
+        if (!hasMultipleSegments) return PreviewTransitionVisual()
 
         val loopCycleIndex = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
             positionMs / totalVideoDurationMs
@@ -205,28 +216,54 @@ class PreviewPlayerController(context: Context) {
                 val isVeryFirstSegment = (loopCycleIndex == 0L && i == 0)
                 val isVeryLastSegment = (endBehavior != VideoEndBehavior.LOOP_TO_AUDIO && i == clipPlayedDurationsMs.lastIndex)
 
-                var alpha = 1f
-                var zoom = 1f
-
+                // Fasa Masuk (Awal Segmen)
                 if (!isVeryFirstSegment && localPos < halfTrans) {
-                    val p = (localPos.toFloat() / halfTrans.toFloat()).coerceIn(0f, 1f)
-                    alpha = p
-                    if (transitionType == com.muzrc.klipsync.model.TransitionType.ZOOM_DISSOLVE) {
-                        zoom = 1.10f - (0.10f * p)
-                    }
-                } else if (!isVeryLastSegment && localPos > (dur - halfTrans)) {
-                    val rem = (dur - localPos).coerceAtLeast(0L)
-                    val p = (rem.toFloat() / halfTrans.toFloat()).coerceIn(0f, 1f)
-                    alpha = p
-                    if (transitionType == com.muzrc.klipsync.model.TransitionType.ZOOM_DISSOLVE) {
-                        zoom = 1.0f + (0.10f * (1f - p))
+                    val progress = (localPos.toFloat() / halfTrans.toFloat()).coerceIn(0f, 1f)
+                    return when (transitionType) {
+                        TransitionType.CROSSFADE -> PreviewTransitionVisual(
+                            blackOverlayAlpha = (1f - progress) * 0.75f
+                        )
+                        TransitionType.FADE_TO_BLACK -> PreviewTransitionVisual(
+                            blackOverlayAlpha = 1f - progress
+                        )
+                        TransitionType.ZOOM_DISSOLVE -> PreviewTransitionVisual(
+                            blackOverlayAlpha = (1f - progress) * 0.70f,
+                            zoomScale = 1.12f - (0.12f * progress)
+                        )
+                        TransitionType.SLIDE_LEFT -> PreviewTransitionVisual(
+                            slideOffsetXFraction = (1f - progress) * 0.35f
+                        )
+                        TransitionType.NONE -> PreviewTransitionVisual()
                     }
                 }
-                return alpha to zoom
+
+                // Fasa Keluar (Hujung Segmen)
+                if (!isVeryLastSegment && localPos > (dur - halfTrans)) {
+                    val remaining = (dur - localPos).coerceAtLeast(0L)
+                    val progress = (remaining.toFloat() / halfTrans.toFloat()).coerceIn(0f, 1f)
+                    return when (transitionType) {
+                        TransitionType.CROSSFADE -> PreviewTransitionVisual(
+                            blackOverlayAlpha = (1f - progress) * 0.75f
+                        )
+                        TransitionType.FADE_TO_BLACK -> PreviewTransitionVisual(
+                            blackOverlayAlpha = 1f - progress
+                        )
+                        TransitionType.ZOOM_DISSOLVE -> PreviewTransitionVisual(
+                            blackOverlayAlpha = (1f - progress) * 0.70f,
+                            zoomScale = 1.0f + (0.12f * (1f - progress))
+                        )
+                        TransitionType.SLIDE_LEFT -> PreviewTransitionVisual(
+                            slideOffsetXFraction = -(1f - progress) * 0.35f
+                        )
+                        TransitionType.NONE -> PreviewTransitionVisual()
+                    }
+                }
+
+                return PreviewTransitionVisual()
             }
             acc += dur
         }
-        return 1f to 1f
+        return PreviewTransitionVisual()
     }
 
     private fun applyCurrentClipSpeed() {
@@ -244,6 +281,7 @@ class PreviewPlayerController(context: Context) {
             seekTo(0L)
         }
 
+        lastDriftCorrectionRealtimeMs = SystemClock.elapsedRealtime()
         applyCurrentClipSpeed()
         val canPlayVideo = totalVideoDurationMs > 0L && (
             endBehavior == VideoEndBehavior.LOOP_TO_AUDIO ||
@@ -264,6 +302,7 @@ class PreviewPlayerController(context: Context) {
 
     fun seekTo(positionMs: Long) {
         val targetMs = positionMs.coerceAtLeast(0L)
+        lastDriftCorrectionRealtimeMs = SystemClock.elapsedRealtime()
         seekVideoOnly(targetMs)
 
         if (audioConfig.uri != null && audioConfig.effectiveAudioDurationMs > 0L) {
@@ -318,16 +357,29 @@ class PreviewPlayerController(context: Context) {
         applyVolumes(pos)
 
         if (isPlaying) {
-            if (hasAudio && totalVideoDurationMs > 0L && pos < audioConfig.effectiveAudioDurationMs) {
+            val nowMs = SystemClock.elapsedRealtime()
+            val canCorrectDrift = (nowMs - lastDriftCorrectionRealtimeMs) > 950L
+
+            if (canCorrectDrift &&
+                hasAudio &&
+                totalVideoDurationMs > 0L &&
+                pos < audioConfig.effectiveAudioDurationMs &&
+                videoPlayer.playbackState == Player.STATE_READY
+            ) {
                 val expectedVideoPos = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
                     pos % totalVideoDurationMs
                 } else {
                     pos.coerceAtMost(totalVideoDurationMs)
                 }
 
-                val actualVideoPos = getRawVideoPositionMs()
-                if (pos < totalVideoDurationMs || endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
-                    if (abs(expectedVideoPos - actualVideoPos) > 150L) {
+                // Elakkan gangguan seek semasa ExoPlayer sedang melengkapkan peralihan sempadan loop
+                val nearLoopBoundary = expectedVideoPos < 350L ||
+                    (totalVideoDurationMs - expectedVideoPos) < 350L
+
+                if (!nearLoopBoundary && (pos < totalVideoDurationMs || endBehavior == VideoEndBehavior.LOOP_TO_AUDIO)) {
+                    val actualVideoPos = getRawVideoPositionMs()
+                    if (abs(expectedVideoPos - actualVideoPos) > 400L) {
+                        lastDriftCorrectionRealtimeMs = nowMs
                         seekVideoOnly(pos)
                         applyCurrentClipSpeed()
                         if (!videoPlayer.isPlaying) {
