@@ -164,6 +164,71 @@ class PreviewPlayerController(context: Context) {
         return expandedClipsCache[idx]
     }
 
+    /**
+     * Mengira kemajuan transisi di sempadan klip (termasuk ulangan loop) untuk pratonton langsung.
+     * Pulangkan Pair(alpha, zoomScale)
+     */
+    fun computePreviewTransitionTransform(
+        positionMs: Long,
+        transitionType: com.muzrc.klipsync.model.TransitionType,
+        transitionDurationMs: Long
+    ): Pair<Float, Float> {
+        if (transitionType == com.muzrc.klipsync.model.TransitionType.NONE ||
+            clipPlayedDurationsMs.isEmpty() ||
+            totalVideoDurationMs <= 0L
+        ) {
+            return 1f to 1f
+        }
+
+        val hasMultipleSegments = clipPlayedDurationsMs.size > 1 ||
+            endBehavior == VideoEndBehavior.LOOP_TO_AUDIO
+        if (!hasMultipleSegments) return 1f to 1f
+
+        val loopCycleIndex = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
+            positionMs / totalVideoDurationMs
+        } else {
+            0L
+        }
+        val mappedPos = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
+            positionMs % totalVideoDurationMs
+        } else {
+            positionMs
+        }
+
+        var acc = 0L
+        for (i in clipPlayedDurationsMs.indices) {
+            val dur = clipPlayedDurationsMs[i]
+            if (mappedPos < acc + dur || i == clipPlayedDurationsMs.lastIndex) {
+                val localPos = (mappedPos - acc).coerceIn(0L, dur)
+                val halfTrans = (transitionDurationMs / 2L).coerceAtMost(dur / 2L).coerceAtLeast(1L)
+
+                val isVeryFirstSegment = (loopCycleIndex == 0L && i == 0)
+                val isVeryLastSegment = (endBehavior != VideoEndBehavior.LOOP_TO_AUDIO && i == clipPlayedDurationsMs.lastIndex)
+
+                var alpha = 1f
+                var zoom = 1f
+
+                if (!isVeryFirstSegment && localPos < halfTrans) {
+                    val p = (localPos.toFloat() / halfTrans.toFloat()).coerceIn(0f, 1f)
+                    alpha = p
+                    if (transitionType == com.muzrc.klipsync.model.TransitionType.ZOOM_DISSOLVE) {
+                        zoom = 1.10f - (0.10f * p)
+                    }
+                } else if (!isVeryLastSegment && localPos > (dur - halfTrans)) {
+                    val rem = (dur - localPos).coerceAtLeast(0L)
+                    val p = (rem.toFloat() / halfTrans.toFloat()).coerceIn(0f, 1f)
+                    alpha = p
+                    if (transitionType == com.muzrc.klipsync.model.TransitionType.ZOOM_DISSOLVE) {
+                        zoom = 1.0f + (0.10f * (1f - p))
+                    }
+                }
+                return alpha to zoom
+            }
+            acc += dur
+        }
+        return 1f to 1f
+    }
+
     private fun applyCurrentClipSpeed() {
         val activeClip = currentActiveClip() ?: return
         val targetSpeed = activeClip.speed.coerceIn(0.25f, 4.0f)

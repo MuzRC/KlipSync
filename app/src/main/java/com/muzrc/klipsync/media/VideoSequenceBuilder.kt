@@ -78,7 +78,6 @@ class VideoSequenceBuilder(private val context: Context) {
 
         val editedItems = mutableListOf<EditedMediaItem>()
 
-        // Kesan global (Crop/Fit, Penapis Warna, Sarikata, Logo Watermark)
         val globalPostEffects = mutableListOf<Effect>()
         globalPostEffects.addAll(
             CropEffectBuilder.buildCropAndScaleEffects(aspectRatio, cropScaleMode, exportConfig)
@@ -146,7 +145,6 @@ class VideoSequenceBuilder(private val context: Context) {
 
             val clipVideoEffects = mutableListOf<Effect>()
 
-            // 1. Putaran & Cermin (Rotate & Mirror Flip)
             if (clip.rotationDegrees != 0 || clip.isMirrored) {
                 val scaleRotate = ScaleAndRotateTransformation.Builder()
                     .setRotationDegrees(clip.rotationDegrees.toFloat())
@@ -155,17 +153,15 @@ class VideoSequenceBuilder(private val context: Context) {
                 clipVideoEffects.add(scaleRotate)
             }
 
-            // 2. Kelajuan Klip (Slow-Mo / Fast-Forward)
             if (safeSpeed !in 0.99f..1.01f) {
                 clipVideoEffects.add(
                     androidx.media3.effect.SpeedChangeEffect(safeSpeed)
                 )
             }
 
-            // 3. Kesan Global (Crop, Color Filter, Lirik, Logo)
             clipVideoEffects.addAll(globalPostEffects)
 
-            // 4. Transisi antara klip
+            // Transisi antara setiap klip (termasuk antara kitaran video loop)
             if (finalClipChain.size > 1 && transitionConfig.transitionType != TransitionType.NONE) {
                 val transDurationUs = (transitionConfig.durationMs.coerceAtMost(finalPlayedDurationMs / 2L)) * 1000L
                 val clipDurationUs = finalPlayedDurationMs * 1000L
@@ -184,6 +180,38 @@ class VideoSequenceBuilder(private val context: Context) {
                                     startUs = (clipDurationUs - transDurationUs).coerceAtLeast(0L),
                                     endUs = clipDurationUs,
                                     fadeIn = false
+                                )
+                            )
+                        }
+                    }
+
+                    TransitionType.ZOOM_DISSOLVE -> {
+                        if (!isFirst && transDurationUs > 0L) {
+                            clipVideoEffects.add(
+                                createFadeEffect(startUs = 0L, endUs = transDurationUs, fadeIn = true)
+                            )
+                            clipVideoEffects.add(
+                                createTransitionZoomEffect(
+                                    startUs = 0L,
+                                    endUs = transDurationUs,
+                                    zoomIn = false
+                                )
+                            )
+                        }
+                        if (!isLast && transDurationUs > 0L) {
+                            val fadeOutStartUs = (clipDurationUs - transDurationUs).coerceAtLeast(0L)
+                            clipVideoEffects.add(
+                                createFadeEffect(
+                                    startUs = fadeOutStartUs,
+                                    endUs = clipDurationUs,
+                                    fadeIn = false
+                                )
+                            )
+                            clipVideoEffects.add(
+                                createTransitionZoomEffect(
+                                    startUs = fadeOutStartUs,
+                                    endUs = clipDurationUs,
+                                    zoomIn = true
                                 )
                             )
                         }
@@ -223,7 +251,6 @@ class VideoSequenceBuilder(private val context: Context) {
             editedItems.add(editedClip)
         }
 
-        // Freeze frame dengan Slow Zoom
         if (hasFreezeFrame) {
             val lastClip = finalClipChain.last()
             val freezeUri = extractLastFrameToTempFile(lastClip)
@@ -266,6 +293,27 @@ class VideoSequenceBuilder(private val context: Context) {
                 val progress = (presentationTimeUs.toFloat() / totalDurationUs.toFloat())
                     .coerceIn(0f, 1f)
                 val scale = 1.0f + (0.12f * progress)
+                matrix.postScale(scale, scale)
+            }
+            matrix
+        }
+    }
+
+    private fun createTransitionZoomEffect(
+        startUs: Long,
+        endUs: Long,
+        zoomIn: Boolean
+    ): MatrixTransformation {
+        return MatrixTransformation { presentationTimeUs ->
+            val matrix = Matrix()
+            if (presentationTimeUs in startUs..endUs && endUs > startUs) {
+                val progress = ((presentationTimeUs - startUs).toFloat() / (endUs - startUs).toFloat())
+                    .coerceIn(0f, 1f)
+                val scale = if (zoomIn) {
+                    1.0f + (0.10f * progress)
+                } else {
+                    1.10f - (0.10f * progress)
+                }
                 matrix.postScale(scale, scale)
             }
             matrix

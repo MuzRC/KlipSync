@@ -189,7 +189,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId) clip.copy(loopCount = safeLoop) else clip
             }
-            val updated = state.copy(clips = updatedClips)
+            // Aktifkan transisi Crossfade secara automatik jika loop > 1 dan transisi masih NONE
+            val nextTransition = if (safeLoop > 1 && state.transitionConfig.transitionType == TransitionType.NONE) {
+                state.transitionConfig.copy(transitionType = TransitionType.CROSSFADE)
+            } else {
+                state.transitionConfig
+            }
+            val updated = state.copy(clips = updatedClips, transitionConfig = nextTransition)
             syncPreviewWithState(updated)
             updated
         }
@@ -325,9 +331,19 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun setVideoEndBehavior(behavior: VideoEndBehavior) {
         pausePlayback()
         _uiState.update { state ->
-            val updated = state.copy(
-                transitionConfig = state.transitionConfig.copy(endBehavior = behavior)
-            )
+            // Aktifkan transisi Crossfade secara automatik apabila pilih Auto-Loop Video supaya cut tidak ketara
+            val nextTransition = if (
+                behavior == VideoEndBehavior.LOOP_TO_AUDIO &&
+                state.transitionConfig.transitionType == TransitionType.NONE
+            ) {
+                state.transitionConfig.copy(
+                    endBehavior = behavior,
+                    transitionType = TransitionType.CROSSFADE
+                )
+            } else {
+                state.transitionConfig.copy(endBehavior = behavior)
+            }
+            val updated = state.copy(transitionConfig = nextTransition)
             syncPreviewWithState(updated)
             updated
         }

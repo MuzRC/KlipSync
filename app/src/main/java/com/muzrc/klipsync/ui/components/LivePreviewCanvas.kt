@@ -63,6 +63,8 @@ fun LivePreviewCanvas(
     totalVideoDurationMs: Long,
     freezeFrameExtensionMs: Long,
     isInFreezeFrameZone: Boolean,
+    transitionAlpha: Float = 1f,
+    transitionZoomScale: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -121,6 +123,7 @@ fun LivePreviewCanvas(
 
         val rotDeg = (activeClip?.rotationDegrees ?: 0).toFloat()
         val mirrorScaleX = if (activeClip?.isMirrored == true) -1f else 1f
+        val combinedZoom = freezeZoomScale * transitionZoomScale
 
         val containerBg = if (cropScaleMode == CropScaleMode.FIT_BLUR) {
             Color(0xFF1A1E29)
@@ -157,7 +160,6 @@ fun LivePreviewCanvas(
                         AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     }
 
-                    // Pratonton penapis warna secara langsung pada videoSurfaceView
                     val m = ColorMatrixBuilder.computeCombined4x4Matrix(colorConfig)
                     val androidColorMatrix = android.graphics.ColorMatrix(
                         floatArrayOf(
@@ -175,13 +177,13 @@ fun LivePreviewCanvas(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        scaleX = freezeZoomScale * mirrorScaleX
-                        scaleY = freezeZoomScale
+                        alpha = transitionAlpha
+                        scaleX = combinedZoom * mirrorScaleX
+                        scaleY = combinedZoom
                         rotationZ = rotDeg
                     }
             )
 
-            // Paparan Logo / Watermark PNG
             if (watermarkBitmap != null) {
                 val wmAlign = when (watermarkConfig.position) {
                     WatermarkPosition.TOP_LEFT -> Alignment.TopStart
@@ -215,7 +217,6 @@ fun LivePreviewCanvas(
                 )
             }
 
-            // Pratonton Lirik / Sarikata
             val activeSubtitles = subtitles.filter {
                 currentPositionMs in it.startMs..it.endMs && it.text.isNotBlank()
             }

@@ -55,6 +55,11 @@ fun EditorScreen(viewModel: EditorViewModel) {
         state.currentPositionMs >= state.totalVideoDurationMs
 
     val currentPlayingClip = viewModel.playerController.currentActiveClip() ?: state.selectedClip
+    val (transAlpha, transZoom) = viewModel.playerController.computePreviewTransitionTransform(
+        positionMs = state.currentPositionMs,
+        transitionType = state.transitionConfig.transitionType,
+        transitionDurationMs = state.transitionConfig.durationMs
+    )
 
     Scaffold(
         topBar = {
@@ -80,7 +85,6 @@ fun EditorScreen(viewModel: EditorViewModel) {
                 .padding(innerPadding)
                 .navigationBarsPadding()
         ) {
-            // Zon 1: Pemain Pratonton Langsung
             LivePreviewCanvas(
                 videoPlayer = viewModel.playerController.videoPlayer,
                 hasClips = state.clips.isNotEmpty(),
@@ -94,6 +98,8 @@ fun EditorScreen(viewModel: EditorViewModel) {
                 totalVideoDurationMs = state.totalVideoDurationMs,
                 freezeFrameExtensionMs = state.freezeFrameExtensionMs,
                 isInFreezeFrameZone = isInFreezeFrameZone,
+                transitionAlpha = transAlpha,
+                transitionZoomScale = transZoom,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(0.35f)
@@ -109,7 +115,6 @@ fun EditorScreen(viewModel: EditorViewModel) {
 
             HorizontalDivider()
 
-            // Zon 2: Garis Masa Multi-Trek (Klip + Waveform Audio + Beat Markers)
             MultiTrackTimeline(
                 clips = state.clips,
                 selectedClipId = state.selectedClip?.id,
@@ -122,7 +127,6 @@ fun EditorScreen(viewModel: EditorViewModel) {
 
             HorizontalDivider()
 
-            // Zon 3: Panel Kawalan Aktif (Boleh Skrol Tegak)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -226,7 +230,6 @@ fun EditorScreen(viewModel: EditorViewModel) {
 
             HorizontalDivider()
 
-            // Bar Alat Melintang Boleh Skrol di Bahagian Paling Bawah
             EditorTabBar(
                 activeTab = state.activeTab,
                 onSelectTab = { viewModel.selectTab(it) }

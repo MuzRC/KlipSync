@@ -8,6 +8,7 @@ enum class JoinMode(val label: String) {
 enum class TransitionType(val label: String) {
     NONE("Tiada (Hard Cut)"),
     CROSSFADE("Crossfade / Larut"),
+    ZOOM_DISSOLVE("Zoom & Larut"),
     FADE_TO_BLACK("Fade ke Hitam"),
     SLIDE_LEFT("Slide Kiri")
 }

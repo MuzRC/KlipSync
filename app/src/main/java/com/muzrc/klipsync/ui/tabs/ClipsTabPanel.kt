@@ -81,6 +81,10 @@ fun ClipsTabPanel(
         }
     }
 
+    val isLoopingActive = clips.any { it.loopCount > 1 } ||
+        (clips.isNotEmpty() && hasLongerAudio && transitionConfig.endBehavior == VideoEndBehavior.LOOP_TO_AUDIO)
+    val showTransitionControls = clips.size > 1 || isLoopingActive
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -132,7 +136,8 @@ fun ClipsTabPanel(
             }
         }
 
-        if (clips.size > 1) {
+        // Paparkan kawalan Transisi & Pertindihan apabila ada banyak klip ATAU video sedang diulang (Loop)
+        if (showTransitionControls) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
@@ -143,7 +148,7 @@ fun ClipsTabPanel(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Cara Gabungan Klip",
+                        text = "Cara Gabungan Klip / Ulangan Loop",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -159,7 +164,7 @@ fun ClipsTabPanel(
                     }
 
                     Text(
-                        text = "Transisi Antara Klip",
+                        text = "Transisi Antara Klip & Loop (Lembutkan Cut)",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -179,13 +184,13 @@ fun ClipsTabPanel(
                     ) {
                         val sec = transitionConfig.durationMs / 1000f
                         Text(
-                            text = "Tempoh Pertindihan / Transisi: ${String.format("%.1f", sec)}s",
+                            text = "Tempoh Transisi / Pertindihan: ${String.format("%.1f", sec)}s",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Slider(
                             value = transitionConfig.durationMs.toFloat(),
                             onValueChange = { onTransitionDurationChange(it.toLong()) },
-                            valueRange = 200f..2500f
+                            valueRange = 300f..2500f
                         )
                     }
                 }
@@ -262,7 +267,6 @@ fun ClipsTabPanel(
                         )
                     }
 
-                    // Bar Alat Klip: Cut, Rotate 90°, Mirror Flip & Loop
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
