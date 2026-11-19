@@ -3,6 +3,7 @@ package com.muzrc.klipsync.util
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.muzrc.klipsync.media.AudioWaveformExtractor
 import com.muzrc.klipsync.model.AspectRatioPreset
 import com.muzrc.klipsync.model.AudioTrackConfig
 import com.muzrc.klipsync.model.ColorFilterConfig

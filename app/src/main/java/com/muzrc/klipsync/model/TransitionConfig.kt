@@ -12,8 +12,14 @@ enum class TransitionType(val label: String) {
     SLIDE_LEFT("Slide Kiri")
 }
 
+enum class VideoEndBehavior(val label: String) {
+    FREEZE_FRAME("Freeze Frame"),
+    LOOP_TO_AUDIO("Auto-Loop Video")
+}
+
 data class TransitionConfig(
     val joinMode: JoinMode = JoinMode.SEQUENTIAL,
     val transitionType: TransitionType = TransitionType.NONE,
-    val durationMs: Long = 800L
+    val durationMs: Long = 800L,
+    val endBehavior: VideoEndBehavior = VideoEndBehavior.FREEZE_FRAME
 )
