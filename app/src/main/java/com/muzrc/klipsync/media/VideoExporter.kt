@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.SystemClock
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.Composition
@@ -36,7 +37,7 @@ import kotlin.math.roundToInt
 class VideoExporter(private val context: Context) {
 
     fun exportProject(state: EditorUiState): Flow<ExportState> = channelFlow {
-        send(ExportState.Exporting(0))
+        send(ExportState.Exporting(1))
 
         if (state.clips.isEmpty()) {
             send(ExportState.Error("Sila pilih sekurang-kurangnya satu klip video atau gambar dahulu."))
@@ -50,13 +51,11 @@ class VideoExporter(private val context: Context) {
 
         try {
             val shortEdge = state.exportConfig.resolution.shortEdgePx
-            // Kompres gambar terus ke dimensi sasaran (720p -> maks 1280px, 1080p -> maks 1600px)
-            // menggunakan RGB_565 (separuh penggunaan RAM berbanding ARGB_8888)
             val preparedClips = prepareCompressedClipsForExport(state.clips, shortEdge)
             val safeState = state.copy(clips = preparedClips)
 
-            // Bebaskan memori sementara sebelum MediaCodec & OpenGL bermula
             System.gc()
+            send(ExportState.Exporting(3))
 
             val sequences = mutableListOf<EditedMediaItemSequence>()
 
@@ -93,8 +92,9 @@ class VideoExporter(private val context: Context) {
                 .experimentalSetForceAudioTrack(hasAnyAudio)
                 .build()
 
-            val targetBitrate = if (shortEdge >= 1080) 6_000_000 else 3_500_000
+            val targetBitrate = if (shortEdge >= 1080) 5_500_000 else 3_200_000
             val encoderFactory = DefaultEncoderFactory.Builder(context)
+                .setEnableFallback(true)
                 .setRequestedVideoEncoderSettings(
                     VideoEncoderSettings.Builder()
                         .setBitrate(targetBitrate)
@@ -104,6 +104,7 @@ class VideoExporter(private val context: Context) {
 
             val exportSuccess = withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine<Result<Unit>> { continuation ->
+                    var transformerRef: Transformer? = null
                     try {
                         val transformer = Transformer.Builder(context)
                             .setVideoMimeType(MimeTypes.VIDEO_H264)
@@ -131,28 +132,80 @@ class VideoExporter(private val context: Context) {
                             })
                             .build()
 
+                        transformerRef = transformer
+
                         val progressHolder = ProgressHolder()
                         val progressJob = launch {
+                            var lastReportedPercent = 4
+                            var lastProgressChangeRealtimeMs = SystemClock.elapsedRealtime()
+                            var lastFileSizeBytes = 0L
+
                             while (isActive) {
+                                val now = SystemClock.elapsedRealtime()
+                                var currentPercent = lastReportedPercent
+
                                 try {
                                     val progressState = transformer.getProgress(progressHolder)
                                     if (progressState == Transformer.PROGRESS_STATE_AVAILABLE) {
-                                        trySend(ExportState.Exporting(progressHolder.progress.coerceIn(1, 98)))
+                                        val p = progressHolder.progress.coerceIn(4, 98)
+                                        if (p > currentPercent) {
+                                            currentPercent = p
+                                            lastProgressChangeRealtimeMs = now
+                                        }
                                     }
                                 } catch (_: Throwable) {
                                 }
-                                delay(250L)
+
+                                // Semak sama ada fail output sedang membesar walaupun peratusan belum berubah
+                                val curSize = if (tempOutputFile.exists()) tempOutputFile.length() else 0L
+                                if (curSize > lastFileSizeBytes) {
+                                    lastFileSizeBytes = curSize
+                                    lastProgressChangeRealtimeMs = now
+                                    if (currentPercent < 15) {
+                                        currentPercent = (currentPercent + 1).coerceAtMost(15)
+                                    }
+                                }
+
+                                if (currentPercent != lastReportedPercent) {
+                                    lastReportedPercent = currentPercent
+                                    trySend(ExportState.Exporting(lastReportedPercent))
+                                } else if (lastReportedPercent < 8 && (now - lastProgressChangeRealtimeMs) > 2000L) {
+                                    // Tunjuk kemajuan awal semasa MediaCodec sedang memulakan enjin
+                                    lastReportedPercent += 1
+                                    trySend(ExportState.Exporting(lastReportedPercent))
+                                }
+
+                                // Watchdog: jika pengekod perkakasan membeku sepenuhnya > 35 saat tanpa sebarang data baharu
+                                if ((now - lastProgressChangeRealtimeMs) > 35_000L) {
+                                    try {
+                                        transformer.cancel()
+                                    } catch (_: Throwable) {
+                                    }
+                                    if (continuation.isActive) {
+                                        continuation.resume(
+                                            Result.failure(
+                                                IllegalStateException(
+                                                    "Pengekod video telefon terhenti (timeout). Cuba tukar resolusi ke 720p HD atau 24 FPS."
+                                                )
+                                            )
+                                        )
+                                    }
+                                    break
+                                }
+
+                                delay(400L)
                             }
                         }
 
                         continuation.invokeOnCancellation {
                             progressJob.cancel()
                             try {
-                                transformer.cancel()
+                                transformerRef?.cancel()
                             } catch (_: Throwable) {
                             }
                         }
 
+                        trySend(ExportState.Exporting(4))
                         transformer.start(composition, tempOutputFile.absolutePath)
                     } catch (t: Throwable) {
                         if (continuation.isActive) {
@@ -201,7 +254,7 @@ class VideoExporter(private val context: Context) {
         clips: List<VideoClip>,
         targetShortEdge: Int
     ): List<VideoClip> = withContext(Dispatchers.IO) {
-        val maxLongEdge = if (targetShortEdge >= 1080) 1600 else 1280
+        val maxLongEdge = if (targetShortEdge >= 1080) 1440 else 1280
         val cachedByUri = mutableMapOf<String, Uri>()
 
         clips.map { clip ->
