@@ -10,6 +10,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import com.muzrc.klipsync.model.AudioTrackConfig
+import com.muzrc.klipsync.model.CameraMotionEffect
 import com.muzrc.klipsync.model.JoinMode
 import com.muzrc.klipsync.model.TransitionConfig
 import com.muzrc.klipsync.model.TransitionType
@@ -21,6 +22,11 @@ data class PreviewTransitionVisual(
     val blackOverlayAlpha: Float = 0f,
     val zoomScale: Float = 1f,
     val slideOffsetXFraction: Float = 0f
+)
+
+data class PreviewClipMotionVisual(
+    val zoomScale: Float = 1f,
+    val panOffsetXFraction: Float = 0f
 )
 
 @OptIn(UnstableApi::class)
@@ -37,7 +43,7 @@ class PreviewPlayerController(context: Context) {
 
     private var expandedClipsCache: List<VideoClip> = emptyList()
     private var clipPlayedDurationsMs: List<Long> = emptyList()
-    private var videoItemIndexMap: List<Int> = emptyList() // -1 jika segmen ialah Gambar
+    private var videoItemIndexMap: List<Int> = emptyList()
     private var totalVideoDurationMs: Long = 0L
     private var audioConfig: AudioTrackConfig = AudioTrackConfig()
     private var endBehavior: VideoEndBehavior = VideoEndBehavior.FREEZE_FRAME
@@ -45,7 +51,6 @@ class PreviewPlayerController(context: Context) {
     private var lastAudioSignature: String = ""
     private var lastDriftCorrectionRealtimeMs: Long = 0L
 
-    // Pemasa dalaman apabila garis masa hanya mengandungi Gambar tanpa trek lagu
     private var standaloneClockBasePositionMs: Long = 0L
     private var standaloneClockStartRealtimeMs: Long = 0L
 
@@ -209,6 +214,55 @@ class PreviewPlayerController(context: Context) {
             return expandedClipsCache[segIdx]
         }
         return expandedClipsCache.firstOrNull()
+    }
+
+    fun computeClipMotionVisual(positionMs: Long): PreviewClipMotionVisual {
+        if (clipPlayedDurationsMs.isEmpty() || totalVideoDurationMs <= 0L) {
+            return PreviewClipMotionVisual()
+        }
+        if (endBehavior == VideoEndBehavior.FREEZE_FRAME && positionMs >= totalVideoDurationMs) {
+            return PreviewClipMotionVisual()
+        }
+
+        val mappedPos = if (endBehavior == VideoEndBehavior.LOOP_TO_AUDIO) {
+            positionMs % totalVideoDurationMs
+        } else {
+            positionMs.coerceIn(0L, totalVideoDurationMs)
+        }
+
+        var acc = 0L
+        for (i in clipPlayedDurationsMs.indices) {
+            val dur = clipPlayedDurationsMs[i]
+            if (mappedPos < acc + dur || i == clipPlayedDurationsMs.lastIndex) {
+                val clip = expandedClipsCache.getOrNull(i) ?: return PreviewClipMotionVisual()
+                val localPos = (mappedPos - acc).coerceIn(0L, dur)
+                val progress = if (dur > 0L) {
+                    (localPos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+
+                return when (clip.motionEffect) {
+                    CameraMotionEffect.NONE -> PreviewClipMotionVisual()
+                    CameraMotionEffect.ZOOM_IN -> PreviewClipMotionVisual(
+                        zoomScale = 1.0f + (0.15f * progress)
+                    )
+                    CameraMotionEffect.ZOOM_OUT -> PreviewClipMotionVisual(
+                        zoomScale = 1.15f - (0.15f * progress)
+                    )
+                    CameraMotionEffect.PAN_LEFT -> PreviewClipMotionVisual(
+                        zoomScale = 1.12f,
+                        panOffsetXFraction = 0.05f - (0.10f * progress)
+                    )
+                    CameraMotionEffect.PAN_RIGHT -> PreviewClipMotionVisual(
+                        zoomScale = 1.12f,
+                        panOffsetXFraction = -0.05f + (0.10f * progress)
+                    )
+                }
+            }
+            acc += dur
+        }
+        return PreviewClipMotionVisual()
     }
 
     fun computePreviewTransitionVisual(

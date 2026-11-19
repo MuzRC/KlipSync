@@ -51,6 +51,7 @@ import com.muzrc.klipsync.model.SubtitlePosition
 import com.muzrc.klipsync.model.VideoClip
 import com.muzrc.klipsync.model.WatermarkConfig
 import com.muzrc.klipsync.model.WatermarkPosition
+import com.muzrc.klipsync.preview.PreviewClipMotionVisual
 import com.muzrc.klipsync.preview.PreviewTransitionVisual
 
 @OptIn(UnstableApi::class)
@@ -69,6 +70,7 @@ fun LivePreviewCanvas(
     freezeFrameExtensionMs: Long,
     isInFreezeFrameZone: Boolean,
     transitionVisual: PreviewTransitionVisual = PreviewTransitionVisual(),
+    motionVisual: PreviewClipMotionVisual = PreviewClipMotionVisual(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -139,7 +141,8 @@ fun LivePreviewCanvas(
 
         val rotDeg = (activeClip?.rotationDegrees ?: 0).toFloat()
         val mirrorScaleX = if (activeClip?.isMirrored == true) -1f else 1f
-        val combinedZoom = freezeZoomScale * transitionVisual.zoomScale
+        val combinedZoom = freezeZoomScale * transitionVisual.zoomScale * motionVisual.zoomScale
+        val combinedOffsetXFraction = transitionVisual.slideOffsetXFraction + motionVisual.panOffsetXFraction
 
         val containerBg = if (cropScaleMode == CropScaleMode.FIT_BLUR) {
             Color(0xFF1A1E29)
@@ -182,7 +185,7 @@ fun LivePreviewCanvas(
                             scaleX = combinedZoom * mirrorScaleX
                             scaleY = combinedZoom
                             rotationZ = rotDeg
-                            translationX = size.width * transitionVisual.slideOffsetXFraction
+                            translationX = size.width * combinedOffsetXFraction
                         }
                 )
             } else {
@@ -221,7 +224,7 @@ fun LivePreviewCanvas(
                             scaleX = combinedZoom * mirrorScaleX
                             scaleY = combinedZoom
                             rotationZ = rotDeg
-                            translationX = size.width * transitionVisual.slideOffsetXFraction
+                            translationX = size.width * combinedOffsetXFraction
                         }
                 )
             }

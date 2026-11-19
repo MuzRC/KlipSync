@@ -3,6 +3,14 @@ package com.muzrc.klipsync.model
 import android.net.Uri
 import java.util.UUID
 
+enum class CameraMotionEffect(val label: String) {
+    NONE("Tiada"),
+    ZOOM_IN("Zoom In Perlahan"),
+    ZOOM_OUT("Zoom Out Perlahan"),
+    PAN_LEFT("Pan Kiri"),
+    PAN_RIGHT("Pan Kanan")
+}
+
 data class VideoClip(
     val id: String = UUID.randomUUID().toString(),
     val uri: Uri,
@@ -17,7 +25,8 @@ data class VideoClip(
     val width: Int = 1080,
     val height: Int = 1920,
     val isImage: Boolean = false,
-    val mimeType: String? = null
+    val mimeType: String? = null,
+    val motionEffect: CameraMotionEffect = CameraMotionEffect.NONE
 ) {
     val rawTrimmedDurationMs: Long
         get() = (trimEndMs - trimStartMs).coerceAtLeast(0L)

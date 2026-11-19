@@ -61,6 +61,9 @@ fun EditorScreen(viewModel: EditorViewModel) {
         transitionType = state.transitionConfig.transitionType,
         transitionDurationMs = state.transitionConfig.durationMs
     )
+    val motionVisual = viewModel.playerController.computeClipMotionVisual(
+        positionMs = state.currentPositionMs
+    )
 
     Scaffold(
         topBar = {
@@ -100,6 +103,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
                 freezeFrameExtensionMs = state.freezeFrameExtensionMs,
                 isInFreezeFrameZone = isInFreezeFrameZone,
                 transitionVisual = transitionVisual,
+                motionVisual = motionVisual,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(0.35f)
@@ -149,6 +153,8 @@ fun EditorScreen(viewModel: EditorViewModel) {
                         onLoopCountChange = { id, count -> viewModel.setClipLoopCount(id, count) },
                         onRotateClip = { viewModel.rotateClip90(it) },
                         onMirrorClip = { viewModel.toggleClipMirror(it) },
+                        onMotionEffectChange = { id, eff -> viewModel.setClipMotionEffect(id, eff) },
+                        onApplyMotionToAll = { eff -> viewModel.applyMotionEffectToAllClips(eff) },
                         onJoinModeChange = { viewModel.setJoinMode(it) },
                         onTransitionTypeChange = { viewModel.setTransitionType(it) },
                         onTransitionDurationChange = { viewModel.setTransitionDuration(it) },

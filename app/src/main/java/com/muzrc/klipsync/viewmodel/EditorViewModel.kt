@@ -9,6 +9,7 @@ import androidx.media3.common.util.UnstableApi
 import com.muzrc.klipsync.media.MediaMetadataReader
 import com.muzrc.klipsync.media.VideoExporter
 import com.muzrc.klipsync.model.AspectRatioPreset
+import com.muzrc.klipsync.model.CameraMotionEffect
 import com.muzrc.klipsync.model.ColorFilterPreset
 import com.muzrc.klipsync.model.CropScaleMode
 import com.muzrc.klipsync.model.EditorTab
@@ -218,6 +219,22 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             val updated = state.copy(clips = updatedClips, transitionConfig = nextTransition)
             syncPreviewWithState(updated)
             updated
+        }
+    }
+
+    fun setClipMotionEffect(clipId: String, effect: CameraMotionEffect) {
+        _uiState.update { state ->
+            val updatedClips = state.clips.map { clip ->
+                if (clip.id == clipId) clip.copy(motionEffect = effect) else clip
+            }
+            state.copy(clips = updatedClips)
+        }
+    }
+
+    fun applyMotionEffectToAllClips(effect: CameraMotionEffect) {
+        _uiState.update { state ->
+            val updatedClips = state.clips.map { it.copy(motionEffect = effect) }
+            state.copy(clips = updatedClips)
         }
     }
 

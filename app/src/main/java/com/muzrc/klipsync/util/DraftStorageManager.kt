@@ -6,6 +6,7 @@ import android.net.Uri
 import com.muzrc.klipsync.media.AudioWaveformExtractor
 import com.muzrc.klipsync.model.AspectRatioPreset
 import com.muzrc.klipsync.model.AudioTrackConfig
+import com.muzrc.klipsync.model.CameraMotionEffect
 import com.muzrc.klipsync.model.ColorFilterConfig
 import com.muzrc.klipsync.model.ColorFilterPreset
 import com.muzrc.klipsync.model.CropScaleMode
@@ -98,6 +99,7 @@ object DraftStorageManager {
                     put("height", clip.height)
                     put("isImage", clip.isImage)
                     put("mimeType", clip.mimeType ?: "")
+                    put("motionEffect", clip.motionEffect.name)
                 })
             }
             put("clips", clipsArr)
@@ -224,7 +226,8 @@ object DraftStorageManager {
                             width = c.optInt("width", 1080),
                             height = c.optInt("height", 1920),
                             isImage = c.optBoolean("isImage", false),
-                            mimeType = c.optString("mimeType").ifBlank { null }
+                            mimeType = c.optString("mimeType").ifBlank { null },
+                            motionEffect = enumOrDefault(c.optString("motionEffect"), CameraMotionEffect.NONE)
                         )
                     )
                 }

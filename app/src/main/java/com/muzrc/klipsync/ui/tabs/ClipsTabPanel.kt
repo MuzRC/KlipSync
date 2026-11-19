@@ -38,6 +38,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.muzrc.klipsync.model.CameraMotionEffect
 import com.muzrc.klipsync.model.JoinMode
 import com.muzrc.klipsync.model.TransitionConfig
 import com.muzrc.klipsync.model.TransitionType
@@ -71,6 +73,8 @@ fun ClipsTabPanel(
     onLoopCountChange: (String, Int) -> Unit,
     onRotateClip: (String) -> Unit,
     onMirrorClip: (String) -> Unit,
+    onMotionEffectChange: (String, CameraMotionEffect) -> Unit,
+    onApplyMotionToAll: (CameraMotionEffect) -> Unit,
     onJoinModeChange: (JoinMode) -> Unit,
     onTransitionTypeChange: (TransitionType) -> Unit,
     onTransitionDurationChange: (Long) -> Unit,
@@ -103,7 +107,6 @@ fun ClipsTabPanel(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Dua butang jelas: Tambah Video & Tambah Gambar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -310,6 +313,40 @@ fun ClipsTabPanel(
                                     )
                                 },
                                 valueRange = 0f..clip.originalDurationMs.toFloat()
+                            )
+                        }
+                    }
+
+                    // Pilihan Gerakan Kamera (Zoom In / Zoom Out / Pan)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Gerakan Kamera (Zoom / Pan)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        if (clips.size > 1) {
+                            TextButton(
+                                onClick = { onApplyMotionToAll(clip.motionEffect) },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                            ) {
+                                Text("Guna Semua", fontSize = 11.sp)
+                            }
+                        }
+                    }
+
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        CameraMotionEffect.entries.forEach { motion ->
+                            FilterChip(
+                                selected = clip.motionEffect == motion,
+                                onClick = { onMotionEffectChange(clip.id, motion) },
+                                label = { Text(motion.label, fontSize = 11.sp) }
                             )
                         }
                     }

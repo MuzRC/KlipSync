@@ -18,6 +18,7 @@ import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import com.muzrc.klipsync.model.AspectRatioPreset
 import com.muzrc.klipsync.model.AudioTrackConfig
+import com.muzrc.klipsync.model.CameraMotionEffect
 import com.muzrc.klipsync.model.ColorFilterConfig
 import com.muzrc.klipsync.model.CropScaleMode
 import com.muzrc.klipsync.model.ExportConfig
@@ -149,6 +150,16 @@ class VideoSequenceBuilder(private val context: Context) {
                 )
             }
 
+            // Gerakan Kamera (Zoom In / Zoom Out / Pan Kiri / Pan Kanan)
+            if (clip.motionEffect != CameraMotionEffect.NONE) {
+                clipVideoEffects.add(
+                    createCameraMotionEffect(
+                        effect = clip.motionEffect,
+                        totalDurationUs = finalPlayedDurationMs * 1000L
+                    )
+                )
+            }
+
             clipVideoEffects.addAll(globalPostEffects)
 
             if (finalClipChain.size > 1 && transitionConfig.transitionType != TransitionType.NONE) {
@@ -265,7 +276,6 @@ class VideoSequenceBuilder(private val context: Context) {
             editedItems.add(editedClip)
         }
 
-        // Sambungan hujung jika audio lebih panjang daripada jumlah gambar/video (Freeze Frame + Slow Zoom)
         if (hasFreezeFrame) {
             val lastClip = finalClipChain.last()
             val freezeUri = if (lastClip.isImage) {
@@ -317,6 +327,42 @@ class VideoSequenceBuilder(private val context: Context) {
             raw.contains("png", ignoreCase = true) -> MimeTypes.IMAGE_PNG
             raw.contains("webp", ignoreCase = true) -> MimeTypes.IMAGE_WEBP
             else -> MimeTypes.IMAGE_JPEG
+        }
+    }
+
+    private fun createCameraMotionEffect(
+        effect: CameraMotionEffect,
+        totalDurationUs: Long
+    ): MatrixTransformation {
+        return MatrixTransformation { presentationTimeUs ->
+            val matrix = Matrix()
+            val progress = if (totalDurationUs > 0L) {
+                (presentationTimeUs.toFloat() / totalDurationUs.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            when (effect) {
+                CameraMotionEffect.NONE -> Unit
+                CameraMotionEffect.ZOOM_IN -> {
+                    val scale = 1.0f + (0.15f * progress)
+                    matrix.postScale(scale, scale)
+                }
+                CameraMotionEffect.ZOOM_OUT -> {
+                    val scale = 1.15f - (0.15f * progress)
+                    matrix.postScale(scale, scale)
+                }
+                CameraMotionEffect.PAN_LEFT -> {
+                    matrix.postScale(1.12f, 1.12f)
+                    val translateX = 0.10f - (0.20f * progress)
+                    matrix.postTranslate(translateX, 0f)
+                }
+                CameraMotionEffect.PAN_RIGHT -> {
+                    matrix.postScale(1.12f, 1.12f)
+                    val translateX = -0.10f + (0.20f * progress)
+                    matrix.postTranslate(translateX, 0f)
+                }
+            }
+            matrix
         }
     }
 
