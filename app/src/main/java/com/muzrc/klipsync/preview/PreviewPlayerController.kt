@@ -247,22 +247,31 @@ class PreviewPlayerController(context: Context) {
                     0f
                 }
 
+                val intensity = clip.motionIntensity.coerceIn(0.05f, 0.50f)
                 return when (clip.motionEffect) {
                     CameraMotionEffect.NONE -> PreviewClipMotionVisual()
                     CameraMotionEffect.ZOOM_IN -> PreviewClipMotionVisual(
-                        zoomScale = 1.0f + (0.22f * progress)
+                        zoomScale = 1.0f + (intensity * progress)
                     )
                     CameraMotionEffect.ZOOM_OUT -> PreviewClipMotionVisual(
-                        zoomScale = 1.22f - (0.22f * progress)
+                        zoomScale = (1.0f + intensity) - (intensity * progress)
                     )
-                    CameraMotionEffect.PAN_LEFT -> PreviewClipMotionVisual(
-                        zoomScale = 1.18f,
-                        panOffsetXFraction = 0.08f - (0.16f * progress)
-                    )
-                    CameraMotionEffect.PAN_RIGHT -> PreviewClipMotionVisual(
-                        zoomScale = 1.18f,
-                        panOffsetXFraction = -0.08f + (0.16f * progress)
-                    )
+                    CameraMotionEffect.PAN_LEFT -> {
+                        val baseZoom = 1.0f + intensity
+                        val maxShift = (intensity * 0.42f)
+                        PreviewClipMotionVisual(
+                            zoomScale = baseZoom,
+                            panOffsetXFraction = maxShift - (2f * maxShift * progress)
+                        )
+                    }
+                    CameraMotionEffect.PAN_RIGHT -> {
+                        val baseZoom = 1.0f + intensity
+                        val maxShift = (intensity * 0.42f)
+                        PreviewClipMotionVisual(
+                            zoomScale = baseZoom,
+                            panOffsetXFraction = -maxShift + (2f * maxShift * progress)
+                        )
+                    }
                 }
             }
             acc += dur
