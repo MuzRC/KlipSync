@@ -4,10 +4,14 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Looper
 import android.os.SystemClock
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSourceBitmapLoader
 import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultAssetLoaderFactory
+import androidx.media3.transformer.DefaultDecoderFactory
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.ExportException
@@ -23,6 +27,7 @@ import com.muzrc.klipsync.util.GallerySaver
 import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -48,19 +53,6 @@ class VideoExporter(private val context: Context) {
                 "Join=${state.transitionConfig.joinMode.name}, Trans=${state.transitionConfig.transitionType.name}, " +
                 "EndBehavior=${state.transitionConfig.endBehavior.name}, FreezeMs=${state.freezeFrameExtensionMs}, " +
                 "AutoLoopMs=${state.autoLoopExtensionMs}"
-        )
-        state.clips.forEachIndexed { idx, c ->
-            ExportDebugLogger.log(
-                "CLIP[$idx]",
-                "name=${c.displayName}, isImage=${c.isImage}, mime=${c.mimeType}, " +
-                    "dim=${c.width}x${c.height}, durMs=${c.effectiveDurationMs}, loop=${c.loopCount}, " +
-                    "speed=${c.speed}, motion=${c.motionEffect.name}(${c.motionIntensity})"
-            )
-        }
-        ExportDebugLogger.log(
-            "AUDIO",
-            "hasMusic=${state.audioConfig.uri != null}, durMs=${state.audioConfig.effectiveAudioDurationMs}, " +
-                "muteOrig=${state.audioConfig.isOriginalAudioMuted}"
         )
 
         send(ExportState.Exporting(1))
@@ -139,20 +131,32 @@ class VideoExporter(private val context: Context) {
                 )
                 .build()
 
+            // Sediakan DataSourceBitmapLoader secara eksplisit supaya ImageAssetLoader tidak gagal checkState(bitmapLoader != null)
+            val assetLoaderFactory = DefaultAssetLoaderFactory(
+                context,
+                DefaultDecoderFactory.Builder(context).build(),
+                false,
+                Looper.getMainLooper(),
+                DataSourceBitmapLoader(context)
+            )
+
             ExportDebugLogger.log("TRANSFORMER", "Memulakan Transformer.start()...")
             val exportSuccess = withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine<Result<Unit>> { continuation ->
                     var transformerRef: Transformer? = null
+                    var progressJob: Job? = null
                     try {
                         val transformer = Transformer.Builder(context)
                             .setVideoMimeType(MimeTypes.VIDEO_H264)
                             .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                            .setAssetLoaderFactory(assetLoaderFactory)
                             .setEncoderFactory(encoderFactory)
                             .addListener(object : Transformer.Listener {
                                 override fun onCompleted(
                                     composition: Composition,
                                     exportResult: ExportResult
                                 ) {
+                                    progressJob?.cancel()
                                     ExportDebugLogger.log(
                                         "TRANSFORMER",
                                         "onCompleted! durationMs=${exportResult.durationMs}, fileSize=${exportResult.fileSizeBytes}"
@@ -167,6 +171,7 @@ class VideoExporter(private val context: Context) {
                                     exportResult: ExportResult,
                                     exportException: ExportException
                                 ) {
+                                    progressJob?.cancel()
                                     ExportDebugLogger.logError(
                                         "TRANSFORMER",
                                         "onError code=${exportException.errorCode} (${exportException.errorCodeName})",
@@ -182,7 +187,7 @@ class VideoExporter(private val context: Context) {
                         transformerRef = transformer
 
                         val progressHolder = ProgressHolder()
-                        val progressJob = launch {
+                        progressJob = launch {
                             var lastReportedPercent = 4
                             var lastProgressChangeRealtimeMs = SystemClock.elapsedRealtime()
                             var lastFileSizeBytes = 0L
@@ -220,8 +225,8 @@ class VideoExporter(private val context: Context) {
                                     trySend(ExportState.Exporting(lastReportedPercent))
                                 }
 
-                                if ((now - lastProgressChangeRealtimeMs) > 35_000L) {
-                                    ExportDebugLogger.logError("WATCHDOG", "Timeout > 35s pada $lastReportedPercent%, fileSize=$curSize")
+                                if ((now - lastProgressChangeRealtimeMs) > 45_000L) {
+                                    ExportDebugLogger.logError("WATCHDOG", "Timeout > 45s pada $lastReportedPercent%, fileSize=$curSize")
                                     try {
                                         transformer.cancel()
                                     } catch (_: Throwable) {
@@ -244,7 +249,7 @@ class VideoExporter(private val context: Context) {
 
                         continuation.invokeOnCancellation {
                             ExportDebugLogger.log("EXPORT", "Eksport dibatalkan oleh pengguna.")
-                            progressJob.cancel()
+                            progressJob?.cancel()
                             try {
                                 transformerRef?.cancel()
                             } catch (_: Throwable) {
@@ -254,6 +259,7 @@ class VideoExporter(private val context: Context) {
                         trySend(ExportState.Exporting(4))
                         transformer.start(composition, tempOutputFile.absolutePath)
                     } catch (t: Throwable) {
+                        progressJob?.cancel()
                         ExportDebugLogger.logError("TRANSFORMER_INIT", "Pengecualian semasa memulakan Transformer", t)
                         if (continuation.isActive) {
                             continuation.resume(Result.failure(t))
