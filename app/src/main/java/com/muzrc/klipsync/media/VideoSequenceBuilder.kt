@@ -237,6 +237,7 @@ class VideoSequenceBuilder(private val context: Context) {
                     .build()
 
                 EditedMediaItem.Builder(imageItem)
+                    .setDurationUs(finalPlayedDurationMs * 1000L)
                     .setRemoveAudio(true)
                     .setFrameRate(exportConfig.frameRate.fps)
                     .setEffects(Effects(emptyList(), clipVideoEffects))
@@ -310,6 +311,7 @@ class VideoSequenceBuilder(private val context: Context) {
                 freezeEffects.add(createSlowZoomEffect(freezeFrameExtensionMs * 1000L))
 
                 val freezeEditedItem = EditedMediaItem.Builder(imageItem)
+                    .setDurationUs(freezeFrameExtensionMs * 1000L)
                     .setRemoveAudio(true)
                     .setFrameRate(exportConfig.frameRate.fps)
                     .setEffects(Effects(emptyList(), freezeEffects))
@@ -449,11 +451,20 @@ class VideoSequenceBuilder(private val context: Context) {
                 MediaMetadataRetriever.OPTION_CLOSEST_SYNC
             ) ?: return null
 
-            val tempFile = File(context.cacheDir, "freeze_frame_${System.currentTimeMillis()}.png")
-            FileOutputStream(tempFile).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 95, out)
+            val evenW = (bitmap.width / 2) * 2
+            val evenH = (bitmap.height / 2) * 2
+            val cleanBitmap = if (evenW > 0 && evenH > 0 && (evenW != bitmap.width || evenH != bitmap.height)) {
+                Bitmap.createBitmap(bitmap, 0, 0, evenW, evenH).also {
+                    if (it != bitmap) bitmap.recycle()
+                }
+            } else {
+                bitmap
             }
-            bitmap.recycle()
+            val tempFile = File(context.cacheDir, "freeze_frame_${System.nanoTime()}.png")
+            FileOutputStream(tempFile).use { out ->
+                cleanBitmap.compress(Bitmap.CompressFormat.PNG, 95, out)
+            }
+            cleanBitmap.recycle()
             Uri.fromFile(tempFile)
         } catch (_: Exception) {
             null
