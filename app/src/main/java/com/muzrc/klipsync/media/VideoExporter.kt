@@ -18,6 +18,7 @@ import androidx.media3.transformer.VideoEncoderSettings
 import com.muzrc.klipsync.model.EditorUiState
 import com.muzrc.klipsync.model.ExportState
 import com.muzrc.klipsync.model.VideoClip
+import com.muzrc.klipsync.util.ExportDebugLogger
 import com.muzrc.klipsync.util.GallerySaver
 import java.io.File
 import java.io.FileOutputStream
@@ -37,9 +38,35 @@ import kotlin.math.roundToInt
 class VideoExporter(private val context: Context) {
 
     fun exportProject(state: EditorUiState): Flow<ExportState> = channelFlow {
+        ExportDebugLogger.init(context)
+        ExportDebugLogger.log("EXPORT", "=== MULA EKSPORT BAHARU ===")
+        ExportDebugLogger.log("EXPORT", ExportDebugLogger.deviceHeader())
+        ExportDebugLogger.log(
+            "CONFIG",
+            "Res=${state.exportConfig.resolution.name}, FPS=${state.exportConfig.frameRate.fps}, " +
+                "Ratio=${state.aspectRatio.name}, ScaleMode=${state.cropScaleMode.name}, " +
+                "Join=${state.transitionConfig.joinMode.name}, Trans=${state.transitionConfig.transitionType.name}, " +
+                "EndBehavior=${state.transitionConfig.endBehavior.name}, FreezeMs=${state.freezeFrameExtensionMs}, " +
+                "AutoLoopMs=${state.autoLoopExtensionMs}"
+        )
+        state.clips.forEachIndexed { idx, c ->
+            ExportDebugLogger.log(
+                "CLIP[$idx]",
+                "name=${c.displayName}, isImage=${c.isImage}, mime=${c.mimeType}, " +
+                    "dim=${c.width}x${c.height}, durMs=${c.effectiveDurationMs}, loop=${c.loopCount}, " +
+                    "speed=${c.speed}, motion=${c.motionEffect.name}(${c.motionIntensity})"
+            )
+        }
+        ExportDebugLogger.log(
+            "AUDIO",
+            "hasMusic=${state.audioConfig.uri != null}, durMs=${state.audioConfig.effectiveAudioDurationMs}, " +
+                "muteOrig=${state.audioConfig.isOriginalAudioMuted}"
+        )
+
         send(ExportState.Exporting(1))
 
         if (state.clips.isEmpty()) {
+            ExportDebugLogger.logError("EXPORT", "Tiada klip video atau gambar dipilih.")
             send(ExportState.Error("Sila pilih sekurang-kurangnya satu klip video atau gambar dahulu."))
             return@channelFlow
         }
@@ -51,6 +78,7 @@ class VideoExporter(private val context: Context) {
 
         try {
             val shortEdge = state.exportConfig.resolution.shortEdgePx
+            ExportDebugLogger.log("STEP", "Memampatkan gambar input (shortEdge=$shortEdge)...")
             val preparedClips = prepareCompressedClipsForExport(state.clips, shortEdge)
             val safeState = state.copy(clips = preparedClips)
 
@@ -59,6 +87,7 @@ class VideoExporter(private val context: Context) {
 
             val sequences = mutableListOf<EditedMediaItemSequence>()
 
+            ExportDebugLogger.log("STEP", "Membina VideoSequence...")
             val videoBuilder = VideoSequenceBuilder(context)
             val videoSequence = videoBuilder.buildVideoSequence(
                 clips = safeState.clips,
@@ -75,11 +104,13 @@ class VideoExporter(private val context: Context) {
             )
 
             if (videoSequence == null) {
+                ExportDebugLogger.logError("STEP", "buildVideoSequence memulangkan null.")
                 send(ExportState.Error("Gagal menyediakan susunan visual untuk eksport."))
                 return@channelFlow
             }
             sequences.add(videoSequence)
 
+            ExportDebugLogger.log("STEP", "Membina AudioSequence...")
             val musicSequence = AudioSequenceBuilder.buildMusicSequence(safeState.audioConfig)
             if (musicSequence != null) {
                 sequences.add(musicSequence)
@@ -87,8 +118,12 @@ class VideoExporter(private val context: Context) {
 
             val hasOriginalVideoAudio = !safeState.audioConfig.isOriginalAudioMuted &&
                 safeState.clips.any { !it.isImage }
-            // ForceAudioTrack hanya diperlukan jika tiada muzik latar tetapi ada klip video dengan audio asal
             val shouldForceAudioTrack = (musicSequence == null && hasOriginalVideoAudio)
+
+            ExportDebugLogger.log(
+                "COMPOSITION",
+                "sequences=${sequences.size}, hasMusic=${musicSequence != null}, forceAudioTrack=$shouldForceAudioTrack"
+            )
 
             val composition = Composition.Builder(sequences)
                 .experimentalSetForceAudioTrack(shouldForceAudioTrack)
@@ -104,6 +139,7 @@ class VideoExporter(private val context: Context) {
                 )
                 .build()
 
+            ExportDebugLogger.log("TRANSFORMER", "Memulakan Transformer.start()...")
             val exportSuccess = withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine<Result<Unit>> { continuation ->
                     var transformerRef: Transformer? = null
@@ -117,6 +153,10 @@ class VideoExporter(private val context: Context) {
                                     composition: Composition,
                                     exportResult: ExportResult
                                 ) {
+                                    ExportDebugLogger.log(
+                                        "TRANSFORMER",
+                                        "onCompleted! durationMs=${exportResult.durationMs}, fileSize=${exportResult.fileSizeBytes}"
+                                    )
                                     if (continuation.isActive) {
                                         continuation.resume(Result.success(Unit))
                                     }
@@ -127,6 +167,11 @@ class VideoExporter(private val context: Context) {
                                     exportResult: ExportResult,
                                     exportException: ExportException
                                 ) {
+                                    ExportDebugLogger.logError(
+                                        "TRANSFORMER",
+                                        "onError code=${exportException.errorCode} (${exportException.errorCodeName})",
+                                        exportException
+                                    )
                                     if (continuation.isActive) {
                                         continuation.resume(Result.failure(exportException))
                                     }
@@ -158,7 +203,6 @@ class VideoExporter(private val context: Context) {
                                 } catch (_: Throwable) {
                                 }
 
-                                // Semak sama ada fail output sedang membesar walaupun peratusan belum berubah
                                 val curSize = if (tempOutputFile.exists()) tempOutputFile.length() else 0L
                                 if (curSize > lastFileSizeBytes) {
                                     lastFileSizeBytes = curSize
@@ -172,13 +216,12 @@ class VideoExporter(private val context: Context) {
                                     lastReportedPercent = currentPercent
                                     trySend(ExportState.Exporting(lastReportedPercent))
                                 } else if (lastReportedPercent < 8 && (now - lastProgressChangeRealtimeMs) > 2000L) {
-                                    // Tunjuk kemajuan awal semasa MediaCodec sedang memulakan enjin
                                     lastReportedPercent += 1
                                     trySend(ExportState.Exporting(lastReportedPercent))
                                 }
 
-                                // Watchdog: jika pengekod perkakasan membeku sepenuhnya > 35 saat tanpa sebarang data baharu
                                 if ((now - lastProgressChangeRealtimeMs) > 35_000L) {
+                                    ExportDebugLogger.logError("WATCHDOG", "Timeout > 35s pada $lastReportedPercent%, fileSize=$curSize")
                                     try {
                                         transformer.cancel()
                                     } catch (_: Throwable) {
@@ -200,6 +243,7 @@ class VideoExporter(private val context: Context) {
                         }
 
                         continuation.invokeOnCancellation {
+                            ExportDebugLogger.log("EXPORT", "Eksport dibatalkan oleh pengguna.")
                             progressJob.cancel()
                             try {
                                 transformerRef?.cancel()
@@ -210,6 +254,7 @@ class VideoExporter(private val context: Context) {
                         trySend(ExportState.Exporting(4))
                         transformer.start(composition, tempOutputFile.absolutePath)
                     } catch (t: Throwable) {
+                        ExportDebugLogger.logError("TRANSFORMER_INIT", "Pengecualian semasa memulakan Transformer", t)
                         if (continuation.isActive) {
                             continuation.resume(Result.failure(t))
                         }
@@ -225,8 +270,10 @@ class VideoExporter(private val context: Context) {
                     displayName = "KlipSync_${System.currentTimeMillis()}.mp4"
                 )
                 if (savedUri != null) {
+                    ExportDebugLogger.log("EXPORT", "Berjaya disimpan ke Galeri: $savedUri")
                     send(ExportState.Success(savedUri.toString()))
                 } else {
+                    ExportDebugLogger.logError("GALLERY", "GallerySaver.saveMp4ToGallery memulangkan null.")
                     send(ExportState.Error("Video siap diproses tetapi gagal disimpan ke Galeri."))
                 }
             } else {
@@ -246,13 +293,15 @@ class VideoExporter(private val context: Context) {
                     } else {
                         ""
                     }
-                    send(ExportState.Error("Eksport gagal: $msg$location"))
+                    send(ExportState.Error("Eksport gagal: $msg$location — semak tab Dev Log"))
                 }
             }
-        } catch (_: OutOfMemoryError) {
+        } catch (oom: OutOfMemoryError) {
             System.gc()
+            ExportDebugLogger.logError("OOM", "OutOfMemoryError semasa eksport", oom)
             send(ExportState.Error("Memori telefon tidak mencukupi. Sila pilih resolusi 720p HD atau kurangkan bilangan gambar."))
         } catch (t: Throwable) {
+            ExportDebugLogger.logError("FATAL", "Ralat luar jangka semasa eksport", t)
             val detail = t.localizedMessage ?: t.javaClass.simpleName
             send(ExportState.Error("Ralat eksport: $detail"))
         } finally {
@@ -335,8 +384,10 @@ class VideoExporter(private val context: Context) {
                 scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
             }
             scaledBitmap.recycle()
+            ExportDebugLogger.log("COMPRESS", "Gambar dimampatkan: ${rawW}x${rawH} -> ${targetW}x${targetH}")
             Uri.fromFile(outFile)
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            ExportDebugLogger.logError("COMPRESS", "Gagal memampatkan gambar $uri", t)
             null
         }
     }
