@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.BrandingWatermark
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
@@ -101,5 +102,6 @@ private fun iconForTab(tab: EditorTab): ImageVector {
         EditorTab.CROP -> Icons.Rounded.AspectRatio
         EditorTab.SUBTITLES -> Icons.Rounded.Subtitles
         EditorTab.WATERMARK -> Icons.Rounded.BrandingWatermark
+        EditorTab.DEV_LOG -> Icons.Rounded.BugReport
     }
 }
