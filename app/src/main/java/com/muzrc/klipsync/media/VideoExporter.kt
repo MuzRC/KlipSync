@@ -4,11 +4,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Looper
 import android.os.SystemClock
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultAssetLoaderFactory
 import androidx.media3.transformer.DefaultDecoderFactory
@@ -135,8 +136,8 @@ class VideoExporter(private val context: Context) {
             val assetLoaderFactory = DefaultAssetLoaderFactory(
                 context,
                 DefaultDecoderFactory.Builder(context).build(),
-                false,
-                Looper.getMainLooper(),
+                Clock.DEFAULT,
+                DefaultMediaSourceFactory(context),
                 DataSourceBitmapLoader(context)
             )
 
