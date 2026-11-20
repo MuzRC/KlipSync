@@ -132,6 +132,11 @@ class VideoSequenceBuilder(private val context: Context) {
             }
 
             val finalPlayedDurationMs = ((adjustedEnd - adjustedStart) / safeSpeed).toLong().coerceAtLeast(100L)
+
+            // Cap masa mula dan tamat bagi klip ini di dalam garis masa jujukan keseluruhan (mikrosaat)
+            val clipStartUs = runningDurationMs * 1000L
+            val clipDurationUs = finalPlayedDurationMs * 1000L
+            val clipEndUs = clipStartUs + clipDurationUs
             runningDurationMs += finalPlayedDurationMs
 
             val clipVideoEffects = mutableListOf<Effect>()
@@ -150,13 +155,14 @@ class VideoSequenceBuilder(private val context: Context) {
                 )
             }
 
-            // Gerakan Kamera (Zoom In / Zoom Out / Pan Kiri / Pan Kanan)
+            // Gerakan Kamera (Zoom In / Zoom Out / Pan Kiri / Pan Kanan) mengikut masa relatif klip
             if (clip.motionEffect != CameraMotionEffect.NONE) {
                 clipVideoEffects.add(
                     createCameraMotionEffect(
                         effect = clip.motionEffect,
                         intensity = clip.motionIntensity,
-                        totalDurationUs = finalPlayedDurationMs * 1000L
+                        clipStartUs = clipStartUs,
+                        clipDurationUs = clipDurationUs
                     )
                 )
             }
@@ -165,53 +171,49 @@ class VideoSequenceBuilder(private val context: Context) {
 
             if (finalClipChain.size > 1 && transitionConfig.transitionType != TransitionType.NONE) {
                 val transDurationUs = (transitionConfig.durationMs.coerceAtMost(finalPlayedDurationMs / 2L)) * 1000L
-                val clipDurationUs = finalPlayedDurationMs * 1000L
+                val fadeInUs = if (!isFirst && transDurationUs > 0L) transDurationUs else 0L
+                val fadeOutUs = if (!isLast && transDurationUs > 0L) transDurationUs else 0L
 
                 when (transitionConfig.transitionType) {
                     TransitionType.CROSSFADE,
                     TransitionType.FADE_TO_BLACK -> {
-                        if (!isFirst && transDurationUs > 0L) {
+                        if (fadeInUs > 0L || fadeOutUs > 0L) {
                             clipVideoEffects.add(
-                                createFadeEffect(startUs = 0L, endUs = transDurationUs, fadeIn = true)
-                            )
-                        }
-                        if (!isLast && transDurationUs > 0L) {
-                            clipVideoEffects.add(
-                                createFadeEffect(
-                                    startUs = (clipDurationUs - transDurationUs).coerceAtLeast(0L),
-                                    endUs = clipDurationUs,
-                                    fadeIn = false
+                                createClipFadeEffect(
+                                    clipStartUs = clipStartUs,
+                                    clipDurationUs = clipDurationUs,
+                                    fadeInDurationUs = fadeInUs,
+                                    fadeOutDurationUs = fadeOutUs
                                 )
                             )
                         }
                     }
 
                     TransitionType.ZOOM_DISSOLVE -> {
-                        if (!isFirst && transDurationUs > 0L) {
+                        if (fadeInUs > 0L || fadeOutUs > 0L) {
                             clipVideoEffects.add(
-                                createFadeEffect(startUs = 0L, endUs = transDurationUs, fadeIn = true)
+                                createClipFadeEffect(
+                                    clipStartUs = clipStartUs,
+                                    clipDurationUs = clipDurationUs,
+                                    fadeInDurationUs = fadeInUs,
+                                    fadeOutDurationUs = fadeOutUs
+                                )
                             )
+                        }
+                        if (fadeInUs > 0L) {
                             clipVideoEffects.add(
                                 createTransitionZoomEffect(
-                                    startUs = 0L,
-                                    endUs = transDurationUs,
+                                    startUs = clipStartUs,
+                                    endUs = clipStartUs + fadeInUs,
                                     zoomIn = false
                                 )
                             )
                         }
-                        if (!isLast && transDurationUs > 0L) {
-                            val fadeOutStartUs = (clipDurationUs - transDurationUs).coerceAtLeast(0L)
-                            clipVideoEffects.add(
-                                createFadeEffect(
-                                    startUs = fadeOutStartUs,
-                                    endUs = clipDurationUs,
-                                    fadeIn = false
-                                )
-                            )
+                        if (fadeOutUs > 0L) {
                             clipVideoEffects.add(
                                 createTransitionZoomEffect(
-                                    startUs = fadeOutStartUs,
-                                    endUs = clipDurationUs,
+                                    startUs = (clipEndUs - fadeOutUs).coerceAtLeast(clipStartUs),
+                                    endUs = clipEndUs,
                                     zoomIn = true
                                 )
                             )
@@ -219,8 +221,13 @@ class VideoSequenceBuilder(private val context: Context) {
                     }
 
                     TransitionType.SLIDE_LEFT -> {
-                        if (!isFirst && transDurationUs > 0L) {
-                            clipVideoEffects.add(createSlideInEffect(transDurationUs))
+                        if (fadeInUs > 0L) {
+                            clipVideoEffects.add(
+                                createSlideInEffect(
+                                    clipStartUs = clipStartUs,
+                                    durationUs = fadeInUs
+                                )
+                            )
                         }
                     }
 
@@ -237,7 +244,7 @@ class VideoSequenceBuilder(private val context: Context) {
                     .build()
 
                 EditedMediaItem.Builder(imageItem)
-                    .setDurationUs(finalPlayedDurationMs * 1000L)
+                    .setDurationUs(clipDurationUs)
                     .setRemoveAudio(true)
                     .setFrameRate(exportConfig.frameRate.fps)
                     .setEffects(Effects(emptyList(), clipVideoEffects))
@@ -292,6 +299,9 @@ class VideoSequenceBuilder(private val context: Context) {
             }
 
             if (freezeUri != null) {
+                val freezeStartUs = runningDurationMs * 1000L
+                val freezeDurationUs = freezeFrameExtensionMs * 1000L
+
                 val imageItem = MediaItem.Builder()
                     .setUri(freezeUri)
                     .setMimeType(freezeMime)
@@ -308,10 +318,15 @@ class VideoSequenceBuilder(private val context: Context) {
                     )
                 }
                 freezeEffects.addAll(globalPostEffects)
-                freezeEffects.add(createSlowZoomEffect(freezeFrameExtensionMs * 1000L))
+                freezeEffects.add(
+                    createSlowZoomEffect(
+                        clipStartUs = freezeStartUs,
+                        totalDurationUs = freezeDurationUs
+                    )
+                )
 
                 val freezeEditedItem = EditedMediaItem.Builder(imageItem)
-                    .setDurationUs(freezeFrameExtensionMs * 1000L)
+                    .setDurationUs(freezeDurationUs)
                     .setRemoveAudio(true)
                     .setFrameRate(exportConfig.frameRate.fps)
                     .setEffects(Effects(emptyList(), freezeEffects))
@@ -336,13 +351,15 @@ class VideoSequenceBuilder(private val context: Context) {
     private fun createCameraMotionEffect(
         effect: CameraMotionEffect,
         intensity: Float,
-        totalDurationUs: Long
+        clipStartUs: Long,
+        clipDurationUs: Long
     ): MatrixTransformation {
         val safeIntensity = intensity.coerceIn(0.05f, 0.50f)
         return MatrixTransformation { presentationTimeUs ->
             val matrix = Matrix()
-            val progress = if (totalDurationUs > 0L) {
-                (presentationTimeUs.toFloat() / totalDurationUs.toFloat()).coerceIn(0f, 1f)
+            val localTimeUs = (presentationTimeUs - clipStartUs).coerceAtLeast(0L)
+            val progress = if (clipDurationUs > 0L) {
+                (localTimeUs.toFloat() / clipDurationUs.toFloat()).coerceIn(0f, 1f)
             } else {
                 0f
             }
@@ -375,11 +392,15 @@ class VideoSequenceBuilder(private val context: Context) {
         }
     }
 
-    private fun createSlowZoomEffect(totalDurationUs: Long): MatrixTransformation {
+    private fun createSlowZoomEffect(
+        clipStartUs: Long,
+        totalDurationUs: Long
+    ): MatrixTransformation {
         return MatrixTransformation { presentationTimeUs ->
             val matrix = Matrix()
             if (totalDurationUs > 0L) {
-                val progress = (presentationTimeUs.toFloat() / totalDurationUs.toFloat())
+                val localTimeUs = (presentationTimeUs - clipStartUs).coerceAtLeast(0L)
+                val progress = (localTimeUs.toFloat() / totalDurationUs.toFloat())
                     .coerceIn(0f, 1f)
                 val scale = 1.0f + (0.12f * progress)
                 matrix.postScale(scale, scale)
@@ -409,16 +430,28 @@ class VideoSequenceBuilder(private val context: Context) {
         }
     }
 
-    private fun createFadeEffect(startUs: Long, endUs: Long, fadeIn: Boolean): Effect {
+    private fun createClipFadeEffect(
+        clipStartUs: Long,
+        clipDurationUs: Long,
+        fadeInDurationUs: Long,
+        fadeOutDurationUs: Long
+    ): Effect {
         return object : RgbMatrix {
             override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
-                val progress = if (endUs > startUs) {
-                    ((presentationTimeUs - startUs).toFloat() / (endUs - startUs).toFloat())
-                        .coerceIn(0f, 1f)
-                } else {
-                    1f
+                val localTimeUs = (presentationTimeUs - clipStartUs).coerceAtLeast(0L)
+                var brightness = 1.0f
+
+                if (fadeInDurationUs > 0L && localTimeUs < fadeInDurationUs) {
+                    brightness *= (localTimeUs.toFloat() / fadeInDurationUs.toFloat()).coerceIn(0f, 1f)
                 }
-                val brightness = if (fadeIn) progress else (1f - progress)
+                if (fadeOutDurationUs > 0L && clipDurationUs > 0L) {
+                    val fadeOutStartLocalUs = (clipDurationUs - fadeOutDurationUs).coerceAtLeast(0L)
+                    if (localTimeUs > fadeOutStartLocalUs) {
+                        val remainingUs = (clipDurationUs - localTimeUs).coerceAtLeast(0L)
+                        brightness *= (remainingUs.toFloat() / fadeOutDurationUs.toFloat()).coerceIn(0f, 1f)
+                    }
+                }
+
                 return floatArrayOf(
                     brightness, 0f, 0f, 0f,
                     0f, brightness, 0f, 0f,
@@ -429,11 +462,15 @@ class VideoSequenceBuilder(private val context: Context) {
         }
     }
 
-    private fun createSlideInEffect(durationUs: Long): MatrixTransformation {
+    private fun createSlideInEffect(
+        clipStartUs: Long,
+        durationUs: Long
+    ): MatrixTransformation {
         return MatrixTransformation { presentationTimeUs ->
             val matrix = Matrix()
-            if (presentationTimeUs < durationUs && durationUs > 0L) {
-                val progress = (presentationTimeUs.toFloat() / durationUs.toFloat()).coerceIn(0f, 1f)
+            val localTimeUs = (presentationTimeUs - clipStartUs).coerceAtLeast(0L)
+            if (localTimeUs in 0L until durationUs && durationUs > 0L) {
+                val progress = (localTimeUs.toFloat() / durationUs.toFloat()).coerceIn(0f, 1f)
                 val translateX = (1f - progress) * 2f
                 matrix.postTranslate(translateX, 0f)
             }
