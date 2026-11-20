@@ -29,6 +29,7 @@ import com.muzrc.klipsync.model.VideoEndBehavior
 import com.muzrc.klipsync.model.WatermarkPosition
 import com.muzrc.klipsync.preview.PreviewPlayerController
 import com.muzrc.klipsync.util.DraftStorageManager
+import com.muzrc.klipsync.util.ExportDebugLogger
 import com.muzrc.klipsync.util.SavedDraftSummary
 import com.muzrc.klipsync.util.SubtitleParser
 import com.muzrc.klipsync.util.UpdateChecker
@@ -67,6 +68,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private var exportJob: Job? = null
 
     init {
+        ExportDebugLogger.init(appContext)
         startPlaybackTicker()
         refreshDrafts()
     }
@@ -550,7 +552,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             continuousKey = "trans_dur",
             syncPreview = true
         ) { state ->
-            state.copy(
+  state.copy(
                 transitionConfig = state.transitionConfig.copy(durationMs = durationMs)
             )
         }
@@ -1050,6 +1052,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(exportState = ExportState.Idle) }
         syncPreviewWithState(cur)
         playerController.seekTo(cur.currentPositionMs)
+    }
+
+    fun clearExportLogs() {
+        ExportDebugLogger.clear(appContext)
     }
 
     // --- Semak Kemas Kini Manual ---
