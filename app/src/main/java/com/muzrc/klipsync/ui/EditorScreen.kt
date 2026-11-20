@@ -38,9 +38,11 @@ import com.muzrc.klipsync.ui.tabs.BeatTabPanel
 import com.muzrc.klipsync.ui.tabs.ClipsTabPanel
 import com.muzrc.klipsync.ui.tabs.ColorTabPanel
 import com.muzrc.klipsync.ui.tabs.CropTabPanel
+import com.muzrc.klipsync.ui.tabs.DevLogTabPanel
 import com.muzrc.klipsync.ui.tabs.SpeedTabPanel
 import com.muzrc.klipsync.ui.tabs.SubtitlesTabPanel
 import com.muzrc.klipsync.ui.tabs.WatermarkTabPanel
+import com.muzrc.klipsync.util.ExportDebugLogger
 import com.muzrc.klipsync.viewmodel.EditorViewModel
 
 @OptIn(UnstableApi::class)
@@ -48,6 +50,7 @@ import com.muzrc.klipsync.viewmodel.EditorViewModel
 fun EditorScreen(viewModel: EditorViewModel) {
     val state by viewModel.uiState.collectAsState()
     val drafts by viewModel.drafts.collectAsState()
+    val exportLogs by ExportDebugLogger.logsFlow.collectAsState()
 
     var showExportDialog by remember { mutableStateOf(false) }
     var showDraftsDialog by remember { mutableStateOf(false) }
@@ -254,6 +257,11 @@ fun EditorScreen(viewModel: EditorViewModel) {
                         onScaleChange = { viewModel.setWatermarkScale(it) },
                         onOpacityChange = { viewModel.setWatermarkOpacity(it) },
                         onPositionChange = { viewModel.setWatermarkPosition(it) }
+                    )
+
+                    EditorTab.DEV_LOG -> DevLogTabPanel(
+                        logText = exportLogs,
+                        onClearLog = { viewModel.clearExportLogs() }
                     )
                 }
             }
