@@ -8,7 +8,8 @@ enum class EditorTab(val title: String) {
     BEAT("Beat"),
     CROP("Crop"),
     SUBTITLES("Lirik"),
-    WATERMARK("Logo")
+    WATERMARK("Logo"),
+    DEV_LOG("Dev Log")
 }
 
 data class EditorUiState(
