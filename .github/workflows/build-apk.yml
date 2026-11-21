@@ -45,6 +45,19 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
 
+      - name: 3b. Pasang Rust Toolchain & Sasaran Android
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - name: 3c. Pasang cargo-ndk & Kompilasi Teras Rust
+        run: |
+          cargo install cargo-ndk
+          if [ -d "app/src/main/rust" ]; then
+            cd app/src/main/rust
+            cargo ndk -t armeabi-v7a -t arm64-v8a -o ../jniLibs build --release
+          fi
+
       - name: 4. Kemas Kini Versi dalam Gradle
         run: |
           GRADLE_FILE="app/build.gradle.kts"
