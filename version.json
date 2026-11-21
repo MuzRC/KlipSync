@@ -1,6 +1,6 @@
 {
-  "latestVersion": "1.0.76",
-  "versionCode": 76,
-  "releaseNotes": "Add files via upload",
-  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.0.76/KlipSync-v1.0.76-signed.apk"
+  "latestVersion": "1.0.81",
+  "versionCode": 81,
+  "releaseNotes": "Update lib.rs",
+  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.0.81/KlipSync-v1.0.81-signed.apk"
 }
