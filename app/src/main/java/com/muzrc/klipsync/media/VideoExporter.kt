@@ -20,9 +20,12 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
+import com.muzrc.klipsync.model.AspectRatioPreset
+import com.muzrc.klipsync.model.CropScaleMode
 import com.muzrc.klipsync.model.EditorUiState
 import com.muzrc.klipsync.model.ExportState
 import com.muzrc.klipsync.model.VideoClip
+import com.muzrc.klipsync.nativecore.NativeCoreBridge
 import com.muzrc.klipsync.util.ExportDebugLogger
 import com.muzrc.klipsync.util.GallerySaver
 import java.io.File
@@ -51,9 +54,7 @@ class VideoExporter(private val context: Context) {
             "CONFIG",
             "Res=${state.exportConfig.resolution.name}, FPS=${state.exportConfig.frameRate.fps}, " +
                 "Ratio=${state.aspectRatio.name}, ScaleMode=${state.cropScaleMode.name}, " +
-                "Join=${state.transitionConfig.joinMode.name}, Trans=${state.transitionConfig.transitionType.name}, " +
-                "EndBehavior=${state.transitionConfig.endBehavior.name}, FreezeMs=${state.freezeFrameExtensionMs}, " +
-                "AutoLoopMs=${state.autoLoopExtensionMs}"
+                "RustCore=${NativeCoreBridge.isNativeLoaded}"
         )
 
         send(ExportState.Exporting(1))
@@ -71,8 +72,13 @@ class VideoExporter(private val context: Context) {
 
         try {
             val shortEdge = state.exportConfig.resolution.shortEdgePx
-            ExportDebugLogger.log("STEP", "Memampatkan gambar input (shortEdge=$shortEdge)...")
-            val preparedClips = prepareCompressedClipsForExport(state.clips, shortEdge)
+            ExportDebugLogger.log("STEP", "Memampatkan gambar input via Rust/Native (shortEdge=$shortEdge)...")
+            val preparedClips = prepareCompressedClipsForExport(
+                clips = state.clips,
+                targetShortEdge = shortEdge,
+                aspectRatio = state.aspectRatio,
+                cropScaleMode = state.cropScaleMode
+            )
             val safeState = state.copy(clips = preparedClips)
 
             System.gc()
@@ -80,7 +86,6 @@ class VideoExporter(private val context: Context) {
 
             val sequences = mutableListOf<EditedMediaItemSequence>()
 
-            ExportDebugLogger.log("STEP", "Membina VideoSequence...")
             val videoBuilder = VideoSequenceBuilder(context)
             val videoSequence = videoBuilder.buildVideoSequence(
                 clips = safeState.clips,
@@ -103,7 +108,6 @@ class VideoExporter(private val context: Context) {
             }
             sequences.add(videoSequence)
 
-            ExportDebugLogger.log("STEP", "Membina AudioSequence...")
             val musicSequence = AudioSequenceBuilder.buildMusicSequence(safeState.audioConfig)
             if (musicSequence != null) {
                 sequences.add(musicSequence)
@@ -112,11 +116,6 @@ class VideoExporter(private val context: Context) {
             val hasOriginalVideoAudio = !safeState.audioConfig.isOriginalAudioMuted &&
                 safeState.clips.any { !it.isImage }
             val shouldForceAudioTrack = (musicSequence == null && hasOriginalVideoAudio)
-
-            ExportDebugLogger.log(
-                "COMPOSITION",
-                "sequences=${sequences.size}, hasMusic=${musicSequence != null}, forceAudioTrack=$shouldForceAudioTrack"
-            )
 
             val composition = Composition.Builder(sequences)
                 .experimentalSetForceAudioTrack(shouldForceAudioTrack)
@@ -132,7 +131,6 @@ class VideoExporter(private val context: Context) {
                 )
                 .build()
 
-            // Sediakan DataSourceBitmapLoader secara eksplisit supaya ImageAssetLoader tidak gagal checkState(bitmapLoader != null)
             val assetLoaderFactory = DefaultAssetLoaderFactory(
                 context,
                 DefaultDecoderFactory.Builder(context).build(),
@@ -321,7 +319,9 @@ class VideoExporter(private val context: Context) {
 
     private suspend fun prepareCompressedClipsForExport(
         clips: List<VideoClip>,
-        targetShortEdge: Int
+        targetShortEdge: Int,
+        aspectRatio: AspectRatioPreset,
+        cropScaleMode: CropScaleMode
     ): List<VideoClip> = withContext(Dispatchers.IO) {
         val maxLongEdge = if (targetShortEdge >= 1080) 1440 else 1280
         val cachedByUri = mutableMapOf<String, Uri>()
@@ -332,7 +332,13 @@ class VideoExporter(private val context: Context) {
             } else {
                 val key = clip.uri.toString()
                 val safeUri = cachedByUri.getOrPut(key) {
-                    compressImageToCacheFile(clip.uri, maxLongEdge) ?: clip.uri
+                    compressImageToCacheFile(
+                        uri = clip.uri,
+                        maxLongEdge = maxLongEdge,
+                        targetShortEdge = targetShortEdge,
+                        aspectRatio = aspectRatio,
+                        cropScaleMode = cropScaleMode
+                    ) ?: clip.uri
                 }
                 clip.copy(
                     uri = safeUri,
@@ -342,7 +348,13 @@ class VideoExporter(private val context: Context) {
         }
     }
 
-    private fun compressImageToCacheFile(uri: Uri, maxLongEdge: Int): Uri? {
+    private fun compressImageToCacheFile(
+        uri: Uri,
+        maxLongEdge: Int,
+        targetShortEdge: Int,
+        aspectRatio: AspectRatioPreset,
+        cropScaleMode: CropScaleMode
+    ): Uri? {
         return try {
             val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.contentResolver.openInputStream(uri)?.use { stream ->
@@ -360,7 +372,7 @@ class VideoExporter(private val context: Context) {
 
             val decodeOpts = BitmapFactory.Options().apply {
                 inSampleSize = sampleSize
-                inPreferredConfig = Bitmap.Config.RGB_565
+                inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val decoded = context.contentResolver.openInputStream(uri)?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, decodeOpts)
@@ -368,30 +380,91 @@ class VideoExporter(private val context: Context) {
 
             val curW = decoded.width
             val curH = decoded.height
-            val longest = max(curW, curH)
-            val scaleFactor = if (longest > maxLongEdge) {
-                maxLongEdge.toFloat() / longest.toFloat()
-            } else {
-                1.0f
-            }
+            val ratioFloat = aspectRatio.aspectRatioFloat
 
-            val targetW = (((curW * scaleFactor).roundToInt() / 2) * 2).coerceAtLeast(2)
-            val targetH = (((curH * scaleFactor).roundToInt() / 2) * 2).coerceAtLeast(2)
+            // Jika mod FIT_BLUR & nisbah skrin berbeza daripada gambar asal, jana latar kabur sebenar dalam Rust
+            val needFitBlur = cropScaleMode == CropScaleMode.FIT_BLUR &&
+                ratioFloat != null &&
+                ratioFloat > 0f &&
+                NativeCoreBridge.isNativeLoaded
 
-            val scaledBitmap = if (targetW != curW || targetH != curH) {
-                Bitmap.createScaledBitmap(decoded, targetW, targetH, true).also {
-                    if (it != decoded) decoded.recycle()
+            val finalBitmap: Bitmap = if (needFitBlur) {
+                val safeShort = ((targetShortEdge / 2) * 2).coerceAtLeast(360)
+                val canvasW: Int
+                val canvasH: Int
+                if (ratioFloat!! >= 1f) {
+                    canvasH = safeShort
+                    canvasW = (((safeShort * ratioFloat).roundToInt() / 2) * 2).coerceAtLeast(360)
+                } else {
+                    canvasW = safeShort
+                    canvasH = (((safeShort / ratioFloat).roundToInt() / 2) * 2).coerceAtLeast(360)
+                }
+
+                val srcPixels = IntArray(curW * curH)
+                decoded.getPixels(srcPixels, 0, curW, 0, 0, curW, curH)
+                decoded.recycle()
+
+                val composedPixels = NativeCoreBridge.composeFitBlurArgbNative(
+                    srcPixels = srcPixels,
+                    srcWidth = curW,
+                    srcHeight = curH,
+                    canvasWidth = canvasW,
+                    canvasHeight = canvasH
+                )
+                if (composedPixels.size == canvasW * canvasH) {
+                    Bitmap.createBitmap(composedPixels, canvasW, canvasH, Bitmap.Config.ARGB_8888)
+                } else {
+                    return null
                 }
             } else {
-                decoded
+                val longest = max(curW, curH)
+                val scaleFactor = if (longest > maxLongEdge) {
+                    maxLongEdge.toFloat() / longest.toFloat()
+                } else {
+                    1.0f
+                }
+
+                val targetW = (((curW * scaleFactor).roundToInt() / 2) * 2).coerceAtLeast(2)
+                val targetH = (((curH * scaleFactor).roundToInt() / 2) * 2).coerceAtLeast(2)
+
+                if (targetW != curW || targetH != curH) {
+                    if (NativeCoreBridge.isNativeLoaded) {
+                        val srcPixels = IntArray(curW * curH)
+                        decoded.getPixels(srcPixels, 0, curW, 0, 0, curW, curH)
+                        decoded.recycle()
+
+                        val resizedPixels = NativeCoreBridge.resizeArgbNative(
+                            srcPixels = srcPixels,
+                            srcWidth = curW,
+                            srcHeight = curH,
+                            dstWidth = targetW,
+                            dstHeight = targetH
+                        )
+                        if (resizedPixels.size == targetW * targetH) {
+                            Bitmap.createBitmap(resizedPixels, targetW, targetH, Bitmap.Config.ARGB_8888)
+                        } else {
+                            return null
+                        }
+                    } else {
+                        Bitmap.createScaledBitmap(decoded, targetW, targetH, true).also {
+                            if (it != decoded) decoded.recycle()
+                        }
+                    }
+                } else {
+                    decoded
+                }
             }
 
             val outFile = File(context.cacheDir, "export_img_${System.nanoTime()}.jpg")
             FileOutputStream(outFile).use { out ->
-                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
+                finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
             }
-            scaledBitmap.recycle()
-            ExportDebugLogger.log("COMPRESS", "Gambar dimampatkan: ${rawW}x${rawH} -> ${targetW}x${targetH}")
+            val outW = finalBitmap.width
+            val outH = finalBitmap.height
+            finalBitmap.recycle()
+
+            val engineTag = if (NativeCoreBridge.isNativeLoaded) "Rust" else "Kotlin"
+            ExportDebugLogger.log("COMPRESS[$engineTag]", "Gambar: ${rawW}x${rawH} -> ${outW}x${outH} (mode=${cropScaleMode.name})")
             Uri.fromFile(outFile)
         } catch (t: Throwable) {
             ExportDebugLogger.logError("COMPRESS", "Gagal memampatkan gambar $uri", t)

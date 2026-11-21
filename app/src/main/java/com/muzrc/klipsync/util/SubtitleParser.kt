@@ -3,6 +3,7 @@ package com.muzrc.klipsync.util
 import android.content.Context
 import android.net.Uri
 import com.muzrc.klipsync.model.SubtitleItem
+import com.muzrc.klipsync.nativecore.NativeCoreBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -23,6 +24,27 @@ object SubtitleParser {
         } catch (_: Exception) {
             null
         } ?: return@withContext emptyList()
+
+        if (NativeCoreBridge.isNativeLoaded) {
+            val encodedRows = NativeCoreBridge.parseSubtitlesNative(rawText, fallbackEndDurationMs)
+            if (encodedRows.isNotEmpty()) {
+                val parsed = encodedRows.mapNotNull { row ->
+                    val firstSep = row.indexOf('|')
+                    val secondSep = if (firstSep != -1) row.indexOf('|', firstSep + 1) else -1
+                    if (firstSep != -1 && secondSep != -1) {
+                        val sMs = row.substring(0, firstSep).toLongOrNull() ?: 0L
+                        val eMs = row.substring(firstSep + 1, secondSep).toLongOrNull() ?: (sMs + 2000L)
+                        val txt = row.substring(secondSep + 1)
+                        if (txt.isNotBlank()) SubtitleItem(text = txt, startMs = sMs, endMs = eMs) else null
+                    } else {
+                        null
+                    }
+                }
+                if (parsed.isNotEmpty()) {
+                    return@withContext parsed
+                }
+            }
+        }
 
         if (rawText.contains("-->")) {
             parseSrt(rawText)

@@ -5,6 +5,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import com.muzrc.klipsync.nativecore.NativeCoreBridge
 import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.max
@@ -52,13 +53,13 @@ object AudioWaveformExtractor {
             codec.configure(audioFormat, null, null, 0)
             codec.start()
 
-            val bucketPeaks = FloatArray(targetBars.coerceAtLeast(16))
+            val safeBars = targetBars.coerceAtLeast(16)
+            val chunks = ArrayList<ShortArray>(128)
+            var totalShorts = 0
+
             val bufferInfo = MediaCodec.BufferInfo()
             var isInputDone = false
             var isOutputDone = false
-            var totalSamplesRead = 0L
-
-            val skipStepBytes = if (durationUs > 60_000_000L) 32 else 16
 
             while (!isOutputDone) {
                 if (!isInputDone) {
@@ -78,7 +79,7 @@ object AudioWaveformExtractor {
                                 codec.queueInputBuffer(inIndex, 0, sampleSize, sampleTimeUs, 0)
                                 if (durationUs > 30_000_000L) {
                                     extractor.seekTo(
-                                        sampleTimeUs + 180_000L,
+                                        sampleTimeUs + 140_000L,
                                         MediaExtractor.SEEK_TO_NEXT_SYNC
                                     )
                                 } else {
@@ -96,26 +97,13 @@ object AudioWaveformExtractor {
                         outBuffer.position(bufferInfo.offset)
                         outBuffer.limit(bufferInfo.offset + bufferInfo.size)
                         val shortBuffer = outBuffer.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-                        val remainingShorts = shortBuffer.remaining()
-
-                        val bucketIndex = if (durationUs > 0L) {
-                            ((bufferInfo.presentationTimeUs.toDouble() / durationUs.toDouble()) * bucketPeaks.size)
-                                .toInt()
-                                .coerceIn(0, bucketPeaks.lastIndex)
-                        } else {
-                            ((totalSamplesRead / 1024L) % bucketPeaks.size).toInt()
+                        val remaining = shortBuffer.remaining()
+                        if (remaining > 0) {
+                            val arr = ShortArray(remaining)
+                            shortBuffer.get(arr)
+                            chunks.add(arr)
+                            totalShorts += remaining
                         }
-
-                        var localMax = 0f
-                        var idx = 0
-                        while (idx < remainingShorts) {
-                            val amp = abs(shortBuffer.get(idx).toInt()) / 32768f
-                            if (amp > localMax) localMax = amp
-                            idx += skipStepBytes
-                        }
-
-                        bucketPeaks[bucketIndex] = max(bucketPeaks[bucketIndex], localMax)
-                        totalSamplesRead += remainingShorts
                     }
                     codec.releaseOutputBuffer(outIndex, false)
 
@@ -125,11 +113,43 @@ object AudioWaveformExtractor {
                 }
             }
 
-            val globalMax = bucketPeaks.maxOrNull()?.coerceAtLeast(0.05f) ?: 1f
-            bucketPeaks.map { peak ->
-                (peak / globalMax).coerceIn(0.12f, 1.0f)
+            if (totalShorts <= 0) return@withContext emptyList()
+
+            val combinedPcm = ShortArray(totalShorts)
+            var offset = 0
+            for (c in chunks) {
+                System.arraycopy(c, 0, combinedPcm, offset, c.size)
+                offset += c.size
             }
-        } catch (_: Exception) {
+            chunks.clear()
+
+            if (NativeCoreBridge.isNativeLoaded) {
+                val nativePeaks = NativeCoreBridge.extractWaveformPeaksNative(
+                    pcmSamples = combinedPcm,
+                    targetBars = safeBars
+                )
+                if (nativePeaks.isNotEmpty()) {
+                    return@withContext nativePeaks.toList()
+                }
+            }
+
+            // Fallback Kotlin
+            val bucketPeaks = FloatArray(safeBars)
+            val step = (combinedPcm.size / safeBars).coerceAtLeast(1)
+            for (b in 0 until safeBars) {
+                val start = b * step
+                if (start >= combinedPcm.size) break
+                val end = ((b + 1) * step).coerceAtMost(combinedPcm.size)
+                var localMax = 0f
+                for (i in start until end) {
+                    val amp = abs(combinedPcm[i].toInt()) / 32768f
+                    localMax = max(localMax, amp)
+                }
+                bucketPeaks[b] = localMax
+            }
+            val globalMax = bucketPeaks.maxOrNull()?.coerceAtLeast(0.05f) ?: 1f
+            bucketPeaks.map { (it / globalMax).coerceIn(0.12f, 1.0f) }
+        } catch (_: Throwable) {
             emptyList()
         } finally {
             try {
