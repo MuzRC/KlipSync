@@ -5,6 +5,8 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import com.muzrc.klipsync.nativecore.NativeCoreBridge
+import com.muzrc.klipsync.util.ExportDebugLogger
 import java.nio.ByteOrder
 import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
@@ -71,13 +73,9 @@ object BeatDetector {
             codec.configure(audioFormat, null, null, 0)
             codec.start()
 
-            // Tetingkap analisis tenaga setiap ~40ms
-            val windowSamples = ((sampleRate * 40L) / 1000L).toInt().coerceAtLeast(256)
-            val windowEnergies = mutableListOf<Pair<Long, Float>>()
-
-            var currentWindowSumSq = 0.0
-            var currentWindowCount = 0
-            var totalFramesProcessed = 0L
+            // Kumpulkan sampel PCM 16-bit untuk diproses terus oleh teras Rust DSP
+            val chunks = ArrayList<ShortArray>(256)
+            var totalShorts = 0
 
             val bufferInfo = MediaCodec.BufferInfo()
             var isInputDone = false
@@ -112,24 +110,12 @@ object BeatDetector {
                         outBuffer.position(bufferInfo.offset)
                         outBuffer.limit(bufferInfo.offset + bufferInfo.size)
                         val shortBuffer = outBuffer.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-                        val remainingShorts = shortBuffer.remaining()
-
-                        var idx = 0
-                        while (idx + channelCount <= remainingShorts) {
-                            // Ambil saluran pertama (mono/kiri) untuk kelajuan analisis
-                            val norm = shortBuffer.get(idx) / 32768.0
-                            currentWindowSumSq += norm * norm
-                            currentWindowCount++
-                            totalFramesProcessed++
-
-                            if (currentWindowCount >= windowSamples) {
-                                val rms = sqrt(currentWindowSumSq / currentWindowCount).toFloat()
-                                val timeMs = (totalFramesProcessed * 1000L) / sampleRate
-                                windowEnergies.add(timeMs to rms)
-                                currentWindowSumSq = 0.0
-                                currentWindowCount = 0
-                            }
-                            idx += channelCount
+                        val count = shortBuffer.remaining()
+                        if (count > 0) {
+                            val arr = ShortArray(count)
+                            shortBuffer.get(arr)
+                            chunks.add(arr)
+                            totalShorts += count
                         }
                     }
                     codec.releaseOutputBuffer(outIndex, false)
@@ -140,50 +126,35 @@ object BeatDetector {
                 }
             }
 
-            if (windowEnergies.size < 6) return@withContext emptyList()
+            if (totalShorts <= 0) return@withContext emptyList()
 
-            // Kira Spectral/Energy Flux (lonjakan tenaga berbanding bingkai sebelumnya)
-            val fluxList = FloatArray(windowEnergies.size)
-            for (i in 1 until windowEnergies.size) {
-                val diff = windowEnergies[i].second - windowEnergies[i - 1].second
-                fluxList[i] = if (diff > 0f) diff else 0f
+            val fullPcm = ShortArray(totalShorts)
+            var offset = 0
+            for (chunk in chunks) {
+                System.arraycopy(chunk, 0, fullPcm, offset, chunk.size)
+                offset += chunk.size
+            }
+            chunks.clear()
+
+            if (NativeCoreBridge.isNativeLoaded) {
+                val t0 = System.nanoTime()
+                val nativeResult = NativeCoreBridge.detectBeatsNative(
+                    pcmSamples = fullPcm,
+                    sampleRate = sampleRate,
+                    channelCount = channelCount,
+                    minIntervalMs = sensitivity.minIntervalMs,
+                    thresholdMultiplier = sensitivity.thresholdMultiplier
+                )
+                val elapsedMs = (System.nanoTime() - t0) / 1_000_000L
+                ExportDebugLogger.log(
+                    "RUST_DSP",
+                    "Auto-Beat Rust selesai dalam ${elapsedMs}ms (${nativeResult.size} beat dikesan)"
+                )
+                return@withContext nativeResult.toList()
             }
 
-            // Pilih puncak beat menggunakan ambang dinamik setempat (~0.8s sekitar)
-            val detectedBeats = mutableListOf<Long>()
-            val historyRadius = 10 // 10 * 40ms = 400ms kiri & kanan
-            var lastAcceptedBeatMs = -sensitivity.minIntervalMs
-
-            for (i in 2 until fluxList.size - 1) {
-                val currentFlux = fluxList[i]
-                if (currentFlux <= 0.008f) continue
-
-                // Pastikan ia adalah puncak tempatan
-                if (currentFlux < fluxList[i - 1] || currentFlux < fluxList[i + 1]) continue
-
-                val startIdx = (i - historyRadius).coerceAtLeast(0)
-                val endIdx = (i + historyRadius).coerceAtMost(fluxList.lastIndex)
-                var sum = 0f
-                var count = 0
-                for (j in startIdx..endIdx) {
-                    sum += fluxList[j]
-                    count++
-                }
-                val localAvg = if (count > 0) sum / count else 0f
-                val threshold = (localAvg * sensitivity.thresholdMultiplier).coerceAtLeast(0.015f)
-
-                val candidateTimeMs = windowEnergies[i].first
-                if (currentFlux >= threshold &&
-                    candidateTimeMs >= 200L &&
-                    (candidateTimeMs - lastAcceptedBeatMs) >= sensitivity.minIntervalMs
-                ) {
-                    detectedBeats.add(candidateTimeMs)
-                    lastAcceptedBeatMs = candidateTimeMs
-                }
-            }
-
-            detectedBeats
-        } catch (_: Exception) {
+            detectBeatsKotlinFallback(fullPcm, sampleRate, channelCount, sensitivity)
+        } catch (_: Throwable) {
             emptyList()
         } finally {
             try {
@@ -196,5 +167,76 @@ object BeatDetector {
             } catch (_: Exception) {
             }
         }
+    }
+
+    private fun detectBeatsKotlinFallback(
+        pcm: ShortArray,
+        sampleRate: Int,
+        channelCount: Int,
+        sensitivity: BeatSensitivity
+    ): List<Long> {
+        val windowSamples = ((sampleRate * 40L) / 1000L).toInt().coerceAtLeast(256)
+        val windowEnergies = mutableListOf<Pair<Long, Float>>()
+
+        var currentWindowSumSq = 0.0
+        var currentWindowCount = 0
+        var totalFramesProcessed = 0L
+
+        var idx = 0
+        while (idx + channelCount <= pcm.size) {
+            val norm = pcm[idx] / 32768.0
+            currentWindowSumSq += norm * norm
+            currentWindowCount++
+            totalFramesProcessed++
+
+            if (currentWindowCount >= windowSamples) {
+                val rms = sqrt(currentWindowSumSq / currentWindowCount).toFloat()
+                val timeMs = (totalFramesProcessed * 1000L) / sampleRate
+                windowEnergies.add(timeMs to rms)
+                currentWindowSumSq = 0.0
+                currentWindowCount = 0
+            }
+            idx += channelCount
+        }
+
+        if (windowEnergies.size < 6) return emptyList()
+
+        val fluxList = FloatArray(windowEnergies.size)
+        for (i in 1 until windowEnergies.size) {
+            val diff = windowEnergies[i].second - windowEnergies[i - 1].second
+            fluxList[i] = if (diff > 0f) diff else 0f
+        }
+
+        val detectedBeats = mutableListOf<Long>()
+        val historyRadius = 10
+        var lastAcceptedBeatMs = -sensitivity.minIntervalMs
+
+        for (i in 2 until fluxList.size - 1) {
+            val currentFlux = fluxList[i]
+            if (currentFlux <= 0.008f) continue
+            if (currentFlux < fluxList[i - 1] || currentFlux < fluxList[i + 1]) continue
+
+            val startIdx = (i - historyRadius).coerceAtLeast(0)
+            val endIdx = (i + historyRadius).coerceAtMost(fluxList.lastIndex)
+            var sum = 0f
+            var count = 0
+            for (j in startIdx..endIdx) {
+                sum += fluxList[j]
+                count++
+            }
+            val localAvg = if (count > 0) sum / count else 0f
+            val threshold = (localAvg * sensitivity.thresholdMultiplier).coerceAtLeast(0.015f)
+
+            val candidateTimeMs = windowEnergies[i].first
+            if (currentFlux >= threshold &&
+                candidateTimeMs >= 200L &&
+                (candidateTimeMs - lastAcceptedBeatMs) >= sensitivity.minIntervalMs
+            ) {
+                detectedBeats.add(candidateTimeMs)
+                lastAcceptedBeatMs = candidateTimeMs
+            }
+        }
+
+        return detectedBeats
     }
 }
