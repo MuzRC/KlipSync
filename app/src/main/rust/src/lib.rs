@@ -1,4 +1,4 @@
-use jni::objects::{JClass, JFloatArray, JIntArray, JLongArray, JObject, JObjectArray, JShortArray, JString, JValue};
+use jni::objects::{JClass, JFloatArray, JIntArray, JLongArray, JObject, JShortArray, JString, JValue};
 use jni::sys::{jfloat, jint, jlong, jobjectArray};
 use jni::JNIEnv;
 
@@ -61,19 +61,17 @@ fn compute_bass_window_energies(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_detectBeatsNative(
-    env: JNIEnv,
-    _class: JClass,
-    pcm_samples: JShortArray,
+pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_detectBeatsNative<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    pcm_samples: JShortArray<'local>,
     sample_rate: jint,
     channel_count: jint,
     min_interval_ms: jlong,
     threshold_multiplier: jfloat,
-) -> JLongArray {
-    let empty_fallback = || -> JLongArray {
-        env.new_long_array(0)
-            .map(|a| a.into_raw())
-            .unwrap_or(std::ptr::null_mut())
+) -> JLongArray<'local> {
+    let empty_fallback = || -> JLongArray<'local> {
+        env.new_long_array(0).unwrap_or_default()
     };
 
     let Ok(len) = env.get_array_length(&pcm_samples) else {
@@ -146,7 +144,7 @@ pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_detec
                 .set_long_array_region(&out_arr, 0, &detected_beats)
                 .is_ok()
             {
-                out_arr.into_raw()
+                out_arr
             } else {
                 empty_fallback()
             }
@@ -156,16 +154,14 @@ pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_detec
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_extractWaveformPeaksNative(
-    env: JNIEnv,
-    _class: JClass,
-    pcm_samples: JShortArray,
+pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_extractWaveformPeaksNative<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    pcm_samples: JShortArray<'local>,
     target_bars: jint,
-) -> JFloatArray {
-    let empty_fallback = || -> JFloatArray {
-        env.new_float_array(0)
-            .map(|a| a.into_raw())
-            .unwrap_or(std::ptr::null_mut())
+) -> JFloatArray<'local> {
+    let empty_fallback = || -> JFloatArray<'local> {
+        env.new_float_array(0).unwrap_or_default()
     };
 
     let Ok(len) = env.get_array_length(&pcm_samples) else {
@@ -213,7 +209,7 @@ pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_extra
     match env.new_float_array(bars as i32) {
         Ok(out_arr) => {
             if env.set_float_array_region(&out_arr, 0, &peaks).is_ok() {
-                out_arr.into_raw()
+                out_arr
             } else {
                 empty_fallback()
             }
@@ -300,7 +296,6 @@ fn fast_box_blur_argb(pixels: &mut [u32], width: usize, height: usize, radius: u
     let mut temp = vec![0xFF000000_u32; width * height];
     let window = (radius * 2 + 1) as u32;
 
-    // Pas mendatar
     for y in 0..height {
         let row = y * width;
         for x in 0..width {
@@ -321,7 +316,6 @@ fn fast_box_blur_argb(pixels: &mut [u32], width: usize, height: usize, radius: u
         }
     }
 
-    // Pas menegak + gelap sedikit (dim 68%) supaya subjek utama menonjol
     for y in 0..height {
         let dst_row = y * width;
         for x in 0..width {
@@ -344,19 +338,17 @@ fn fast_box_blur_argb(pixels: &mut [u32], width: usize, height: usize, radius: u
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_resizeArgbNative(
-    env: JNIEnv,
-    _class: JClass,
-    src_pixels: JIntArray,
+pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_resizeArgbNative<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    src_pixels: JIntArray<'local>,
     src_w: jint,
     src_h: jint,
     dst_w: jint,
     dst_h: jint,
-) -> JIntArray {
-    let empty_fallback = || -> JIntArray {
-        env.new_int_array(0)
-            .map(|a| a.into_raw())
-            .unwrap_or(std::ptr::null_mut())
+) -> JIntArray<'local> {
+    let empty_fallback = || -> JIntArray<'local> {
+        env.new_int_array(0).unwrap_or_default()
     };
 
     if src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0 {
@@ -388,7 +380,7 @@ pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_resiz
     match env.new_int_array(out_i32.len() as i32) {
         Ok(out_arr) => {
             if env.set_int_array_region(&out_arr, 0, &out_i32).is_ok() {
-                out_arr.into_raw()
+                out_arr
             } else {
                 empty_fallback()
             }
@@ -397,21 +389,18 @@ pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_resiz
     }
 }
 
-/// Menjana bingkai penuh dengan latar belakang kabur (Fit-Blur) secara natif dalam Rust
 #[no_mangle]
-pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_composeFitBlurArgbNative(
-    env: JNIEnv,
-    _class: JClass,
-    src_pixels: JIntArray,
+pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_composeFitBlurArgbNative<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    src_pixels: JIntArray<'local>,
     src_w: jint,
     src_h: jint,
     canvas_w: jint,
     canvas_h: jint,
-) -> JIntArray {
-    let empty_fallback = || -> JIntArray {
-        env.new_int_array(0)
-            .map(|a| a.into_raw())
-            .unwrap_or(std::ptr::null_mut())
+) -> JIntArray<'local> {
+    let empty_fallback = || -> JIntArray<'local> {
+        env.new_int_array(0).unwrap_or_default()
     };
 
     if src_w <= 0 || src_h <= 0 || canvas_w <= 0 || canvas_h <= 0 {
@@ -435,7 +424,6 @@ pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_compo
     }
     let src_u32: Vec<u32> = src_buf.into_iter().map(|v| v as u32).collect();
 
-    // 1. Bina latar belakang kecil (1/8 saiz kanvas), kaburkan dengan box blur 2 pas, dan besarkan
     let blur_w = (cw / 8).max(32);
     let blur_h = (ch / 8).max(32);
     let scale_fill = (blur_w as f32 / sw as f32).max(blur_h as f32 / sh as f32);
@@ -456,7 +444,6 @@ pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_compo
     fast_box_blur_argb(&mut bg_small, blur_w, blur_h, 4);
     let mut canvas = resize_argb_bilinear(&bg_small, blur_w, blur_h, cw, ch);
 
-    // 2. Skala gambar utama secara Fit di tengah kanvas
     let scale_fit = (cw as f32 / sw as f32).min(ch as f32 / sh as f32);
     let fit_w = ((sw as f32 * scale_fit).round() as usize).clamp(1, cw);
     let fit_h = ((sh as f32 * scale_fit).round() as usize).clamp(1, ch);
@@ -474,7 +461,7 @@ pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_compo
     match env.new_int_array(out_i32.len() as i32) {
         Ok(out_arr) => {
             if env.set_int_array_region(&out_arr, 0, &out_i32).is_ok() {
-                out_arr.into_raw()
+                out_arr
             } else {
                 empty_fallback()
             }
@@ -613,13 +600,13 @@ fn parse_srt_rust(content: &str) -> Vec<RawSubtitleEntry> {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_parseSubtitlesNative(
-    mut env: JNIEnv,
-    _class: JClass,
-    raw_content: JString,
+pub extern "system" fn Java_com_muzrc_klipsync_nativecore_NativeCoreBridge_parseSubtitlesNative<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    raw_content: JString<'local>,
     fallback_end_ms: jlong,
 ) -> jobjectArray {
-    let empty_obj_array = |env: &mut JNIEnv| -> jobjectArray {
+    let empty_obj_array = |env: &mut JNIEnv<'local>| -> jobjectArray {
         env.find_class("java/lang/String")
             .and_then(|cls| env.new_object_array(0, cls, JObject::null()))
             .map(|a| a.into_raw())
