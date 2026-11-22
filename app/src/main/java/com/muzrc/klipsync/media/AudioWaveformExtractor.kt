@@ -6,6 +6,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import com.muzrc.klipsync.nativecore.NativeCoreBridge
+import com.muzrc.klipsync.util.ExportDebugLogger
 import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.max
@@ -13,6 +14,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 object AudioWaveformExtractor {
+
+    private const val TAG = "WAVEFORM"
+    private const val MAX_IDLE_ITERATIONS = 2000
 
     suspend fun extractWaveformPeaks(
         context: Context,
@@ -43,11 +47,6 @@ object AudioWaveformExtractor {
 
             extractor.selectTrack(audioTrackIndex)
             val mime = audioFormat.getString(MediaFormat.KEY_MIME) ?: return@withContext emptyList()
-            val durationUs = if (audioFormat.containsKey(MediaFormat.KEY_DURATION)) {
-                audioFormat.getLong(MediaFormat.KEY_DURATION)
-            } else {
-                0L
-            }
 
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(audioFormat, null, null, 0)
@@ -60,11 +59,18 @@ object AudioWaveformExtractor {
             val bufferInfo = MediaCodec.BufferInfo()
             var isInputDone = false
             var isOutputDone = false
+            var idleIterations = 0
 
+            // Nota: kita tidak guna seekTo dalam loop kerana ia menyebabkan
+            // sampel tidak berterusan dan decoder state tidak konsisten.
+            // Untuk waveform, kita proses semua sampel secara berurutan.
             while (!isOutputDone) {
+                var progress = false
+
                 if (!isInputDone) {
                     val inIndex = codec.dequeueInputBuffer(5000L)
                     if (inIndex >= 0) {
+                        progress = true
                         val inputBuffer = codec.getInputBuffer(inIndex)
                         if (inputBuffer != null) {
                             val sampleSize = extractor.readSampleData(inputBuffer, 0)
@@ -77,14 +83,7 @@ object AudioWaveformExtractor {
                             } else {
                                 val sampleTimeUs = extractor.sampleTime
                                 codec.queueInputBuffer(inIndex, 0, sampleSize, sampleTimeUs, 0)
-                                if (durationUs > 30_000_000L) {
-                                    extractor.seekTo(
-                                        sampleTimeUs + 140_000L,
-                                        MediaExtractor.SEEK_TO_NEXT_SYNC
-                                    )
-                                } else {
-                                    extractor.advance()
-                                }
+                                extractor.advance()
                             }
                         }
                     }
@@ -92,6 +91,7 @@ object AudioWaveformExtractor {
 
                 val outIndex = codec.dequeueOutputBuffer(bufferInfo, 5000L)
                 if (outIndex >= 0) {
+                    progress = true
                     val outBuffer = codec.getOutputBuffer(outIndex)
                     if (outBuffer != null && bufferInfo.size > 0) {
                         outBuffer.position(bufferInfo.offset)
@@ -110,6 +110,16 @@ object AudioWaveformExtractor {
                     if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                         isOutputDone = true
                     }
+                }
+
+                // Timeout keseluruhan untuk elak hang
+                if (!progress) {
+                    if (++idleIterations > MAX_IDLE_ITERATIONS) {
+                        ExportDebugLogger.log(TAG, "Timeout selepas $idleIterations iterasi idle")
+                        break
+                    }
+                } else {
+                    idleIterations = 0
                 }
             }
 
@@ -134,22 +144,9 @@ object AudioWaveformExtractor {
             }
 
             // Fallback Kotlin
-            val bucketPeaks = FloatArray(safeBars)
-            val step = (combinedPcm.size / safeBars).coerceAtLeast(1)
-            for (b in 0 until safeBars) {
-                val start = b * step
-                if (start >= combinedPcm.size) break
-                val end = ((b + 1) * step).coerceAtMost(combinedPcm.size)
-                var localMax = 0f
-                for (i in start until end) {
-                    val amp = abs(combinedPcm[i].toInt()) / 32768f
-                    localMax = max(localMax, amp)
-                }
-                bucketPeaks[b] = localMax
-            }
-            val globalMax = bucketPeaks.maxOrNull()?.coerceAtLeast(0.05f) ?: 1f
-            bucketPeaks.map { (it / globalMax).coerceIn(0.12f, 1.0f) }
-        } catch (_: Throwable) {
+            buildBucketPeaks(combinedPcm, safeBars)
+        } catch (t: Throwable) {
+            ExportDebugLogger.log(TAG, "Gagal extract waveform: ${t.message}")
             emptyList()
         } finally {
             try {
@@ -162,5 +159,28 @@ object AudioWaveformExtractor {
             } catch (_: Exception) {
             }
         }
+    }
+
+    private fun buildBucketPeaks(pcm: ShortArray, safeBars: Int): List<Float> {
+        if (pcm.isEmpty() || safeBars <= 0) return emptyList()
+
+        val bucketPeaks = FloatArray(safeBars)
+        // Jika sampel kurang daripada bilangan bar, setiap bar ambil 1 sampel.
+        val step = (pcm.size / safeBars).coerceAtLeast(1)
+
+        for (b in 0 until safeBars) {
+            val start = b * step
+            if (start >= pcm.size) break
+            val end = ((b + 1) * step).coerceAtMost(pcm.size)
+            var localMax = 0f
+            for (i in start until end) {
+                val amp = abs(pcm[i].toInt()) / 32768f
+                localMax = max(localMax, amp)
+            }
+            bucketPeaks[b] = localMax
+        }
+
+        val globalMax = bucketPeaks.maxOrNull()?.coerceAtLeast(0.05f) ?: 1f
+        return bucketPeaks.map { (it / globalMax).coerceIn(0.12f, 1.0f) }
     }
 }
