@@ -109,23 +109,23 @@ fun WatermarkTabPanel(
                     }
 
                     Text(
-                        text = "Saiz Logo: ${(config.scalePercent * 100).toInt()}%",
+                        text = "Saiz Logo: ${(config.clampedScalePercent * 100).toInt()}%",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Slider(
-                        value = config.scalePercent,
+                        value = config.clampedScalePercent,
                         onValueChange = onScaleChange,
-                        valueRange = 0.08f..0.55f
+                        valueRange = 0.10f..0.50f
                     )
 
                     Text(
-                        text = "Kelegapan (Opacity): ${(config.opacity * 100).toInt()}%",
+                        text = "Kelegapan (Opacity): ${(config.clampedOpacity * 100).toInt()}%",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Slider(
-                        value = config.opacity,
+                        value = config.clampedOpacity,
                         onValueChange = onOpacityChange,
                         valueRange = 0.15f..1.0f
                     )
