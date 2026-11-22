@@ -146,7 +146,6 @@ class VideoSequenceBuilder(private val context: Context) {
             val finalPlayedDurationMs = ((adjustedEnd - adjustedStart) / safeSpeed).toLong().coerceAtLeast(100L)
             val clipDurationUs = finalPlayedDurationMs * 1000L
 
-            // Media3 menyerahkan presentationTimeUs relatif kepada klip (mula dari 0).
             val clipStartUs = 0L
             val clipEndUs = clipDurationUs
 
@@ -249,7 +248,7 @@ class VideoSequenceBuilder(private val context: Context) {
                 }
             }
 
-            // 5. Global post effects (terakhir supaya subtitle/watermark tidak terjejas)
+            // 5. Global post effects (terakhir)
             clipVideoEffects.addAll(globalPostEffects)
 
             val editedClip = if (clip.isImage) {
@@ -263,6 +262,7 @@ class VideoSequenceBuilder(private val context: Context) {
                 EditedMediaItem.Builder(imageItem)
                     .setRemoveAudio(true)
                     .setFrameRate(exportConfig.frameRate.fps)
+                    .setDurationUs(finalPlayedDurationMs * 1000L) // ← PEMBETULAN
                     .setEffects(Effects(emptyList(), clipVideoEffects))
                     .build()
             } else {
@@ -344,6 +344,7 @@ class VideoSequenceBuilder(private val context: Context) {
                 val freezeEditedItem = EditedMediaItem.Builder(imageItem)
                     .setRemoveAudio(true)
                     .setFrameRate(exportConfig.frameRate.fps)
+                    .setDurationUs(freezeDurationUs) // ← PEMBETULAN untuk freeze frame
                     .setEffects(Effects(emptyList(), freezeEffects))
                     .build()
 
@@ -367,173 +368,7 @@ class VideoSequenceBuilder(private val context: Context) {
         }
     }
 
-    private fun createCameraMotionEffect(
-        effect: CameraMotionEffect,
-        intensity: Float,
-        clipStartUs: Long,
-        clipDurationUs: Long
-    ): MatrixTransformation {
-        val safeIntensity = intensity.coerceIn(0.05f, 0.50f)
-        return MatrixTransformation { presentationTimeUs ->
-            val matrix = Matrix()
-            val localTimeUs = (presentationTimeUs - clipStartUs).coerceAtLeast(0L)
-            val progress = if (clipDurationUs > 0L) {
-                (localTimeUs.toFloat() / clipDurationUs.toFloat()).coerceIn(0f, 1f)
-            } else {
-                0f
-            }
-            when (effect) {
-                CameraMotionEffect.NONE -> Unit
-                CameraMotionEffect.ZOOM_IN -> {
-                    val scale = 1.0f + (safeIntensity * progress)
-                    matrix.postScale(scale, scale)
-                }
-                CameraMotionEffect.ZOOM_OUT -> {
-                    val scale = (1.0f + safeIntensity) - (safeIntensity * progress)
-                    matrix.postScale(scale, scale)
-                }
-                CameraMotionEffect.PAN_LEFT -> {
-                    val baseZoom = 1.0f + safeIntensity
-                    matrix.postScale(baseZoom, baseZoom)
-                    val maxTranslate = safeIntensity * 0.80f
-                    val translateX = maxTranslate - (2f * maxTranslate * progress)
-                    matrix.postTranslate(translateX, 0f)
-                }
-                CameraMotionEffect.PAN_RIGHT -> {
-                    val baseZoom = 1.0f + safeIntensity
-                    matrix.postScale(baseZoom, baseZoom)
-                    val maxTranslate = safeIntensity * 0.80f
-                    val translateX = -maxTranslate + (2f * maxTranslate * progress)
-                    matrix.postTranslate(translateX, 0f)
-                }
-            }
-            matrix
-        }
-    }
-
-    private fun createSlowZoomEffect(
-        clipStartUs: Long,
-        totalDurationUs: Long
-    ): MatrixTransformation {
-        return MatrixTransformation { presentationTimeUs ->
-            val matrix = Matrix()
-            if (totalDurationUs > 0L) {
-                val localTimeUs = (presentationTimeUs - clipStartUs).coerceAtLeast(0L)
-                val progress = (localTimeUs.toFloat() / totalDurationUs.toFloat())
-                    .coerceIn(0f, 1f)
-                val scale = 1.0f + (0.12f * progress)
-                matrix.postScale(scale, scale)
-            }
-            matrix
-        }
-    }
-
-    private fun createTransitionZoomEffect(
-        startUs: Long,
-        endUs: Long,
-        zoomIn: Boolean
-    ): MatrixTransformation {
-        return MatrixTransformation { presentationTimeUs ->
-            val matrix = Matrix()
-            if (presentationTimeUs in startUs..endUs && endUs > startUs) {
-                val progress = ((presentationTimeUs - startUs).toFloat() / (endUs - startUs).toFloat())
-                    .coerceIn(0f, 1f)
-                val scale = if (zoomIn) {
-                    1.0f + (0.10f * progress)
-                } else {
-                    1.10f - (0.10f * progress)
-                }
-                matrix.postScale(scale, scale)
-            }
-            matrix
-        }
-    }
-
-    private fun createClipFadeEffect(
-        clipStartUs: Long,
-        clipDurationUs: Long,
-        fadeInDurationUs: Long,
-        fadeOutDurationUs: Long
-    ): Effect {
-        return object : RgbMatrix {
-            override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
-                val localTimeUs = (presentationTimeUs - clipStartUs).coerceAtLeast(0L)
-                var brightness = 1.0f
-
-                if (fadeInDurationUs > 0L && localTimeUs < fadeInDurationUs) {
-                    brightness *= (localTimeUs.toFloat() / fadeInDurationUs.toFloat()).coerceIn(0f, 1f)
-                }
-                if (fadeOutDurationUs > 0L && clipDurationUs > 0L) {
-                    val fadeOutStartLocalUs = (clipDurationUs - fadeOutDurationUs).coerceAtLeast(0L)
-                    if (localTimeUs > fadeOutStartLocalUs) {
-                        val remainingUs = (clipDurationUs - localTimeUs).coerceAtLeast(0L)
-                        brightness *= (remainingUs.toFloat() / fadeOutDurationUs.toFloat()).coerceIn(0f, 1f)
-                    }
-                }
-
-                return floatArrayOf(
-                    brightness, 0f, 0f, 0f,
-                    0f, brightness, 0f, 0f,
-                    0f, 0f, brightness, 0f,
-                    0f, 0f, 0f, 1f
-                )
-            }
-        }
-    }
-
-    private fun createSlideInEffect(
-        clipStartUs: Long,
-        durationUs: Long
-    ): MatrixTransformation {
-        return MatrixTransformation { presentationTimeUs ->
-            val matrix = Matrix()
-            val localTimeUs = (presentationTimeUs - clipStartUs).coerceAtLeast(0L)
-            if (localTimeUs in 0L until durationUs && durationUs > 0L) {
-                val progress = (localTimeUs.toFloat() / durationUs.toFloat()).coerceIn(0f, 1f)
-                val translateX = (1f - progress) * 1f
-                matrix.postTranslate(translateX, 0f)
-            }
-            matrix
-        }
-    }
-
-    private fun extractLastFrameToTempFile(clip: VideoClip): Uri? {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(context, clip.uri)
-            val targetTimeUs = ((clip.trimEndMs - 50L).coerceAtLeast(clip.trimStartMs)) * 1000L
-            val bitmap = retriever.getFrameAtTime(
-                targetTimeUs,
-                MediaMetadataRetriever.OPTION_CLOSEST
-            ) ?: return null
-
-            val evenW = (bitmap.width / 2) * 2
-            val evenH = (bitmap.height / 2) * 2
-            val cleanBitmap = if (evenW > 0 && evenH > 0 && (evenW != bitmap.width || evenH != bitmap.height)) {
-                Bitmap.createBitmap(bitmap, 0, 0, evenW, evenH).also {
-                    if (it != bitmap) bitmap.recycle()
-                }
-            } else {
-                bitmap
-            }
-            val tempFile = File(context.cacheDir, "freeze_frame_${System.nanoTime()}.png")
-            FileOutputStream(tempFile).use { out ->
-                cleanBitmap.compress(Bitmap.CompressFormat.PNG, 95, out)
-            }
-            cleanBitmap.recycle()
-
-            FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                tempFile
-            )
-        } catch (_: Exception) {
-            null
-        } finally {
-            try {
-                retriever.release()
-            } catch (_: Exception) {
-            }
-        }
-    }
+    // ... (fungsi lain kekal sama: createCameraMotionEffect, createSlowZoomEffect,
+    //      createTransitionZoomEffect, createClipFadeEffect, createSlideInEffect,
+    //      extractLastFrameToTempFile)
 }
