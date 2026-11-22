@@ -78,36 +78,36 @@ fun ColorTabPanel(
                 }
 
                 Text(
-                    text = "Kecerahan (Brightness): ${String.format(Locale.US, "%+.2f", colorConfig.brightness)}",
+                    text = "Kecerahan (Brightness): ${String.format(Locale.US, "%+.2f", colorConfig.clampedBrightness)}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Slider(
-                    value = colorConfig.brightness,
+                    value = colorConfig.clampedBrightness,
                     onValueChange = onBrightnessChange,
-                    valueRange = -0.4f..0.4f
+                    valueRange = -0.5f..0.5f
                 )
 
                 Text(
-                    text = "Kontras (Contrast): ${String.format(Locale.US, "%.2fx", colorConfig.contrast)}",
+                    text = "Kontras (Contrast): ${String.format(Locale.US, "%.2fx", colorConfig.clampedContrast)}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Slider(
-                    value = colorConfig.contrast,
+                    value = colorConfig.clampedContrast,
                     onValueChange = onContrastChange,
-                    valueRange = 0.6f..1.5f
+                    valueRange = 0.5f..1.5f
                 )
 
                 Text(
-                    text = "Kepekatan Warna (Saturation): ${String.format(Locale.US, "%.2fx", colorConfig.saturation)}",
+                    text = "Kepekatan Warna (Saturation): ${String.format(Locale.US, "%.2fx", colorConfig.clampedSaturation)}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Slider(
-                    value = colorConfig.saturation,
+                    value = colorConfig.clampedSaturation,
                     onValueChange = onSaturationChange,
-                    valueRange = 0f..1.8f
+                    valueRange = 0f..2f
                 )
             }
         }
