@@ -110,4 +110,55 @@ object SubtitleOverlayBuilder {
             }
 
             val staticLayout = StaticLayout.Builder
-                .obtain(item.text
+                .obtain(item.text, 0, item.text.length, textPaint, maxTextWidth)
+                .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                .setLineSpacing(4f * scaleFactor, 1.0f)
+                .setIncludePad(true)
+                .build()
+
+            val textHeight = staticLayout.height.toFloat()
+            var maxLineWidth = 0f
+            for (i in 0 until staticLayout.lineCount) {
+                maxLineWidth = maxOf(maxLineWidth, staticLayout.getLineWidth(i))
+            }
+
+            val padH = 14f * scaleFactor
+            val padV = 8f * scaleFactor
+
+            val topY = when (item.position) {
+                SubtitlePosition.TOP -> videoHeight * 0.10f
+                SubtitlePosition.CENTER -> (videoHeight - textHeight) / 2f
+                SubtitlePosition.BOTTOM -> videoHeight * 0.82f - textHeight
+            }.coerceAtLeast(0f)
+
+            if (item.hasDarkBackground) {
+                val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.argb(175, 0, 0, 0)
+                    style = Paint.Style.FILL
+                }
+                val rect = RectF(
+                    (videoWidth - maxLineWidth) / 2f - padH,
+                    topY - padV,
+                    (videoWidth + maxLineWidth) / 2f + padH,
+                    topY + textHeight + padV
+                )
+                val radius = 10f * scaleFactor
+                canvas.drawRoundRect(rect, radius, radius, bgPaint)
+            }
+
+            canvas.save()
+            canvas.translate(horizontalMargin, topY)
+            staticLayout.draw(canvas)
+            canvas.restore()
+        }
+
+        private fun resolveTypeface(family: SubtitleFontFamily): Typeface {
+            return when (family) {
+                SubtitleFontFamily.SANS_SERIF -> Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+                SubtitleFontFamily.SERIF -> Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+                SubtitleFontFamily.BOLD_DISPLAY -> Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                SubtitleFontFamily.MONOSPACE -> Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
+            }
+        }
+    }
+}
