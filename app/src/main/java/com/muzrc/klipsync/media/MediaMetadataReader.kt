@@ -12,6 +12,11 @@ import kotlinx.coroutines.withContext
 
 class MediaMetadataReader(private val context: Context) {
 
+    private companion object {
+        const val FALLBACK_VIDEO_DURATION_MS = 4000L
+        const val FALLBACK_IMAGE_DURATION_MS = 4000L
+    }
+
     suspend fun readMediaClip(uri: Uri): VideoClip = withContext(Dispatchers.IO) {
         val mime = context.contentResolver.getType(uri) ?: ""
         val lowerPath = uri.toString().lowercase()
@@ -50,13 +55,12 @@ class MediaMetadataReader(private val context: Context) {
         } catch (_: Exception) {
         }
 
-        val defaultImageDurationMs = 4000L
         VideoClip(
             uri = uri,
             displayName = displayName,
-            originalDurationMs = defaultImageDurationMs,
+            originalDurationMs = FALLBACK_IMAGE_DURATION_MS,
             trimStartMs = 0L,
-            trimEndMs = defaultImageDurationMs,
+            trimEndMs = FALLBACK_IMAGE_DURATION_MS,
             width = width,
             height = height,
             isImage = true,
@@ -107,6 +111,15 @@ class MediaMetadataReader(private val context: Context) {
             }
         }
 
+        // Fallback jika metadata tidak dapat dibaca.
+        if (durationMs <= 0L) {
+            durationMs = FALLBACK_VIDEO_DURATION_MS
+        }
+        if (width <= 0 || height <= 0) {
+            width = 1080
+            height = 1920
+        }
+
         VideoClip(
             uri = uri,
             displayName = displayName,
@@ -153,7 +166,7 @@ class MediaMetadataReader(private val context: Context) {
             uri = uri,
             displayName = displayName,
             isExtractedFromVideo = isExtractedFromVideo,
-            totalDurationMs = durationMs,
+            totalDurationMs = durationMs.coerceAtLeast(0L),
             startOffsetMs = 0L,
             waveformPeaks = peaks
         )
