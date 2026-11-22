@@ -10,13 +10,7 @@ import com.muzrc.klipsync.model.ColorFilterPreset
 object ColorMatrixBuilder {
 
     fun buildColorEffect(config: ColorFilterConfig): Effect? {
-        val isDefault = config.preset == ColorFilterPreset.NONE &&
-            config.brightness in -0.01f..0.01f &&
-            config.contrast in 0.99f..1.01f &&
-            config.saturation in 0.99f..1.01f
-
-        if (isDefault) return null
-
+        if (config.isDefault) return null
         val matrix = computeCombined4x4Matrix(config)
         return object : RgbMatrix {
             override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = matrix
@@ -24,25 +18,30 @@ object ColorMatrixBuilder {
     }
 
     fun computeCombined4x4Matrix(config: ColorFilterConfig): FloatArray {
+        // Guna nilai yang sudah di-clamp dari model.
+        val baseSat = config.clampedSaturation
+        val baseCon = config.clampedContrast
+        val baseBright = config.clampedBrightness
+
         val sat = when (config.preset) {
             ColorFilterPreset.BLACK_AND_WHITE -> 0f
-            ColorFilterPreset.VINTAGE -> (config.saturation * 0.72f).coerceIn(0f, 2f)
-            ColorFilterPreset.VIVID -> (config.saturation * 1.35f).coerceIn(0f, 2f)
-            else -> config.saturation.coerceIn(0f, 2f)
+            ColorFilterPreset.VINTAGE -> (baseSat * 0.72f).coerceIn(0f, 2f)
+            ColorFilterPreset.VIVID -> (baseSat * 1.35f).coerceIn(0f, 2f)
+            else -> baseSat
         }
 
         val con = when (config.preset) {
-            ColorFilterPreset.MOODY_DARK -> (config.contrast * 1.18f).coerceIn(0.5f, 1.8f)
-            ColorFilterPreset.VIVID -> (config.contrast * 1.15f).coerceIn(0.5f, 1.8f)
-            else -> config.contrast.coerceIn(0.5f, 1.8f)
+            ColorFilterPreset.MOODY_DARK -> (baseCon * 1.18f).coerceIn(0.5f, 1.8f)
+            ColorFilterPreset.VIVID -> (baseCon * 1.15f).coerceIn(0.5f, 1.8f)
+            else -> baseCon
         }
 
         val bright = when (config.preset) {
-            ColorFilterPreset.MOODY_DARK -> config.brightness - 0.08f
-            else -> config.brightness
+            ColorFilterPreset.MOODY_DARK -> baseBright - 0.08f
+            else -> baseBright
         }.coerceIn(-1f, 1f)
 
-        // Tint per channel, dinormalisasi supaya jumlahnya ~3.0
+        // Tint per channel, dinormalisasi supaya jumlahnya ~3.0.
         // Ini memastikan tint tidak mengubah kecerahan keseluruhan.
         val (rawRTint, rawGTint, rawBTint) = when (config.preset) {
             ColorFilterPreset.CINEMATIC_WARM -> Triple(1.08f, 1.02f, 0.90f)
@@ -71,25 +70,14 @@ object ColorMatrixBuilder {
         //           R_row2, G_row2, B_row2, A_row2,
         //           R_row3, G_row3, B_row3, A_row3]
         //
-        // Setiap baris output (R', G', B', A') = matrix * (R, G, B, A)
+        // Formula: out = con * T * S * in + offset
+        // S = saturation matrix, T = tint diagonal, C = contrast, offset = brightness
         //
-        // Kita gabungkan: output = Contrast(Saturation(input)) * Tint
-        // Sat matrix:  S = [rLum+sat, gLum,     bLum,
-        //                   rLum,     gLum+sat, bLum,
-        //                   rLum,     gLum,     bLum+sat]
-        // Contrast:    C = con * S, offset = (0.5*(1-con)) + bright
-        // Tint:        T = diag(rTint, gTint, bTint)
-        //
-        // Hasil: out = con * T * S * in + offset
-        //
-        // Baris R': [ (rLum+sat)*rTint, gLum*rTint, bLum*rTint, 0 ]
-        // Baris G': [ rLum*gTint, (gLum+sat)*gTint, bLum*gTint, 0 ]
-        // Baris B': [ rLum*bTint, gLum*bTint, (bLum+sat)*bTint, 0 ]
+        // Baris R': [ (rLum+sat)*rTint, gLum*rTint, bLum*rTint, 0 ] * con
+        // Baris G': [ rLum*gTint, (gLum+sat)*gTint, bLum*gTint, 0 ] * con
+        // Baris B': [ rLum*bTint, gLum*bTint, (bLum+sat)*bTint, 0 ] * con
         // Baris A': [ 0, 0, 0, 1 ]
-        // Baris offset: [offset, offset, offset, 0]  (ditambah pada RGB)
-        //
-        // Nota: Media3 RgbMatrix menggunakan matriks 4x4 yang di-apply pada
-        // vektor (R, G, B, A) dengan baris ke-4 sebagai translation.
+        // Baris offset: [ offset, offset, offset, 0 ]  (ditambah pada RGB)
         return floatArrayOf(
             // Row 0 (R output)
             (rLum + sat) * con * rTint,
@@ -107,7 +95,6 @@ object ColorMatrixBuilder {
             (bLum + sat) * con * bTint,
             0f,
             // Row 3 (A output) — translation untuk RGB diletak di sini
-            // kerana Media3 menggunakan konvensyen [R,G,B,A] * M + offset
             offset,
             offset,
             offset,
