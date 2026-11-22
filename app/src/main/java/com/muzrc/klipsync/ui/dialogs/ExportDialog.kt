@@ -21,8 +21,10 @@ import androidx.compose.ui.unit.dp
 import com.muzrc.klipsync.model.ExportConfig
 import com.muzrc.klipsync.model.ExportFrameRate
 import com.muzrc.klipsync.model.ExportResolution
+import com.muzrc.klipsync.model.ExportStage
 import com.muzrc.klipsync.model.ExportState
 import com.muzrc.klipsync.util.TimeFormatter
+import java.util.Locale
 
 @Composable
 fun ExportDialog(
@@ -88,8 +90,14 @@ fun ExportDialog(
                     }
 
                     is ExportState.Exporting -> {
+                        val stageLabel = when (exportState.stage) {
+                            ExportStage.PREPARING -> "Menyediakan..."
+                            ExportStage.ENCODING -> "Mengekod video..."
+                            ExportStage.SAVING -> "Menyimpan ke Galeri..."
+                            ExportStage.FINALIZING -> "Menyelesaikan..."
+                        }
                         Text(
-                            text = "Sedang memproses dan menggabungkan video... ${exportState.progressPercent}%",
+                            text = "$stageLabel ${exportState.progressPercent}%",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         LinearProgressIndicator(
@@ -99,8 +107,22 @@ fun ExportDialog(
                     }
 
                     is ExportState.Success -> {
+                        val hasMetadata =
+                            exportState.fileSizeBytes > 0L || exportState.durationMs > 0L
+                        val successText = if (hasMetadata) {
+                            val sizeMb = exportState.fileSizeBytes / (1024.0 * 1024.0)
+                            val durSec = exportState.durationMs / 1000.0
+                            String.format(
+                                Locale.US,
+                                "Berjaya! %.1f saat, %.1f MB disimpan ke folder Movies/KlipSync.",
+                                durSec,
+                                sizeMb
+                            )
+                        } else {
+                            "Berjaya! Video telah disimpan ke folder Movies/KlipSync di dalam Galeri anda."
+                        }
                         Text(
-                            text = "Berjaya! Video telah disimpan ke folder Movies/KlipSync di dalam Galeri anda.",
+                            text = successText,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -108,7 +130,10 @@ fun ExportDialog(
                             onClick = {
                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                     type = "video/mp4"
-                                    putExtra(Intent.EXTRA_STREAM, Uri.parse(exportState.savedUriString))
+                                    putExtra(
+                                        Intent.EXTRA_STREAM,
+                                        Uri.parse(exportState.savedUriString)
+                                    )
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                 }
                                 context.startActivity(
