@@ -150,7 +150,7 @@ fun LivePreviewCanvas(
             1.0f
         }
 
-        val rotDeg = (activeClip?.rotationDegrees ?: 0).toFloat()
+        val rotDeg = (activeClip?.normalizedRotationDegrees ?: 0).toFloat()
         val mirrorScaleX = if (activeClip?.isMirrored == true) -1f else 1f
         val combinedZoom = freezeZoomScale * transitionVisual.zoomScale * motionVisual.zoomScale
         val combinedOffsetXFraction = transitionVisual.slideOffsetXFraction + motionVisual.panOffsetXFraction
@@ -262,8 +262,8 @@ fun LivePreviewCanvas(
                     modifier = Modifier
                         .align(wmAlign)
                         .padding(10.dp)
-                        .fillMaxWidth(watermarkConfig.scalePercent.coerceIn(0.08f, 0.55f))
-                        .alpha(watermarkConfig.opacity.coerceIn(0.15f, 1.0f))
+                        .fillMaxWidth(watermarkConfig.clampedScalePercent)
+                        .alpha(watermarkConfig.clampedOpacity)
                 )
             }
 
@@ -282,7 +282,7 @@ fun LivePreviewCanvas(
             }
 
             val activeSubtitles = subtitles.filter {
-                currentPositionMs in it.startMs..it.endMs && it.text.isNotBlank()
+                currentPositionMs in it.startMs..it.endMs && it.hasValidText
             }
 
             activeSubtitles.forEach { item ->
@@ -312,8 +312,8 @@ fun LivePreviewCanvas(
                 ) {
                     Text(
                         text = item.text,
-                        color = Color(item.textColorHex),
-                        fontSize = (item.fontSizeSp * 0.72f).sp,
+                        color = Color(item.textColorArgb),
+                        fontSize = (item.clampedFontSizeSp * 0.72f).sp,
                         fontFamily = fontFamily,
                         fontWeight = fontWeight,
                         textAlign = TextAlign.Center,
