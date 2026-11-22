@@ -68,9 +68,6 @@ object BeatDetector {
                 2
             }
 
-            // Nota: seekTo dibuat SEBELUM codec.start(), jadi tidak perlu flush.
-            // Timestamp hasil akan relatif kepada fail asal (bukan offset),
-            // kerana decoder akan mula decode pada sync point terdekat.
             if (startOffsetMs > 0L) {
                 extractor.seekTo(startOffsetMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
             }
@@ -155,9 +152,10 @@ object BeatDetector {
             }
             chunks.clear()
 
+            // ===== PERUBAHAN UTAMA: Guna wrapper safe =====
             if (NativeCoreBridge.isNativeLoaded) {
                 val t0 = System.nanoTime()
-                val nativeResult = NativeCoreBridge.detectBeatsNative(
+                val nativeResult = NativeCoreBridge.detectBeatsSafe(
                     pcmSamples = fullPcm,
                     sampleRate = sampleRate,
                     channelCount = channelCount,
@@ -165,16 +163,20 @@ object BeatDetector {
                     thresholdMultiplier = sensitivity.thresholdMultiplier
                 )
                 val elapsedMs = (System.nanoTime() - t0) / 1_000_000L
-                ExportDebugLogger.log(
-                    "RUST_DSP",
-                    "Auto-Beat Rust selesai dalam ${elapsedMs}ms (${nativeResult.size} beat dikesan)"
-                )
-                // Nota: timestamp native adalah relatif kepada sampel yang
-                // decoded. Jika startOffsetMs > 0, decoder bermula pada sync
-                // point terdekat, jadi timestamp adalah relatif kepada fail.
-                // Jika anda perlukan timestamp relatif kepada offset, tambah
-                // startOffsetMs di sini.
-                return@withContext nativeResult.toList()
+
+                if (nativeResult != null) {
+                    ExportDebugLogger.log(
+                        "RUST_DSP",
+                        "Auto-Beat Rust selesai dalam ${elapsedMs}ms (${nativeResult.size} beat dikesan)"
+                    )
+                    return@withContext nativeResult.toList()
+                } else {
+                    // Native gagal, fallback ke Kotlin
+                    ExportDebugLogger.log(
+                        "RUST_DSP",
+                        "detectBeatsSafe gagal selepas ${elapsedMs}ms, fallback ke Kotlin"
+                    )
+                }
             }
 
             detectBeatsKotlinFallback(fullPcm, sampleRate, channelCount, sensitivity)
@@ -209,7 +211,6 @@ object BeatDetector {
 
         var idx = 0
         while (idx + channelCount <= pcm.size) {
-            // Purata RMS merentasi semua channel untuk sensitiviti lebih baik
             var frameSumSq = 0.0
             for (ch in 0 until channelCount) {
                 val norm = pcm[idx + ch] / 32768.0
