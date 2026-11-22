@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.core.content.FileProvider
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -31,6 +32,7 @@ import com.muzrc.klipsync.model.VideoEndBehavior
 import com.muzrc.klipsync.model.WatermarkConfig
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.max
 
 @UnstableApi
 class VideoSequenceBuilder(private val context: Context) {
@@ -50,8 +52,9 @@ class VideoSequenceBuilder(private val context: Context) {
     ): EditedMediaItemSequence? {
         if (clips.isEmpty()) return null
 
+        // Hadkan loopCount untuk elak senarai terlalu besar.
         val baseExpandedClips = clips.flatMap { clip ->
-            List(clip.loopCount.coerceAtLeast(1)) { clip }
+            List(clip.loopCount.coerceIn(1, 20)) { clip }
         }
 
         val finalClipChain = mutableListOf<VideoClip>()
@@ -76,6 +79,13 @@ class VideoSequenceBuilder(private val context: Context) {
             }
             safetyIterations++
         } while (targetMinDurationMs > 0L && accumulatedMs < targetMinDurationMs && safetyIterations < 100)
+
+        if (targetMinDurationMs > 0L && accumulatedMs < targetMinDurationMs) {
+            ExportDebugLogger.log(
+                "VIDEO_SEQ",
+                "Amaran: accumulatedMs=$accumulatedMs < targetMinDurationMs=$targetMinDurationMs selepas $safetyIterations iterasi"
+            )
+        }
 
         val editedItems = mutableListOf<EditedMediaItem>()
 
@@ -112,14 +122,18 @@ class VideoSequenceBuilder(private val context: Context) {
             val isLast = index == finalClipChain.lastIndex
             val safeSpeed = if (clip.isImage) 1.0f else clip.speed.coerceIn(0.25f, 4.0f)
 
+            val clipRawDurationMs = (clip.trimEndMs - clip.trimStartMs).coerceAtLeast(100L)
+            // Pastikan overlap tidak melebihi separuh durasi klip.
+            val safeOverlapHalfMs = overlapHalfMs.coerceAtMost(clipRawDurationMs / 2)
+
             val adjustedStart = if (!isFirst) {
-                (clip.trimStartMs + (overlapHalfMs * safeSpeed).toLong()).coerceAtMost(clip.trimEndMs)
+                (clip.trimStartMs + (safeOverlapHalfMs * safeSpeed).toLong()).coerceAtMost(clip.trimEndMs)
             } else {
                 clip.trimStartMs
             }
 
             var adjustedEnd = if (!isLast) {
-                (clip.trimEndMs - (overlapHalfMs * safeSpeed).toLong()).coerceAtLeast(adjustedStart)
+                (clip.trimEndMs - (safeOverlapHalfMs * safeSpeed).toLong()).coerceAtLeast(adjustedStart)
             } else {
                 clip.trimEndMs
             }
@@ -132,30 +146,37 @@ class VideoSequenceBuilder(private val context: Context) {
             }
 
             val finalPlayedDurationMs = ((adjustedEnd - adjustedStart) / safeSpeed).toLong().coerceAtLeast(100L)
-
-            // Cap masa mula dan tamat bagi klip ini di dalam garis masa jujukan keseluruhan (mikrosaat)
-            val clipStartUs = runningDurationMs * 1000L
             val clipDurationUs = finalPlayedDurationMs * 1000L
-            val clipEndUs = clipStartUs + clipDurationUs
+
+            // Nota: Media3 menyerahkan presentationTimeUs secara relatif kepada
+            // klip (mula dari 0), bukan relatif kepada sequence. Jadi kita
+            // gunakan 0 sebagai clipStartUs dan clipDurationUs sebagai durasi.
+            // Jika Media3 mengubah tingkah laku ini pada masa depan, semak semula.
+            val clipStartUs = 0L
+            val clipEndUs = clipDurationUs
+
             runningDurationMs += finalPlayedDurationMs
 
             val clipVideoEffects = mutableListOf<Effect>()
 
+            // 1. Orientasi (rotate/mirror)
             if (clip.rotationDegrees != 0 || clip.isMirrored) {
+                val normalizedRotation = ((clip.rotationDegrees % 360) + 360) % 360
                 val scaleRotate = ScaleAndRotateTransformation.Builder()
-                    .setRotationDegrees(clip.rotationDegrees.toFloat())
+                    .setRotationDegrees(normalizedRotation.toFloat())
                     .setScale(if (clip.isMirrored) -1f else 1f, 1f)
                     .build()
                 clipVideoEffects.add(scaleRotate)
             }
 
+            // 2. Speed change (mesti sebelum effect yang bergantung pada masa)
             if (!clip.isImage && safeSpeed !in 0.99f..1.01f) {
                 clipVideoEffects.add(
                     androidx.media3.effect.SpeedChangeEffect(safeSpeed)
                 )
             }
 
-            // Gerakan Kamera (Zoom In / Zoom Out / Pan Kiri / Pan Kanan) mengikut masa relatif klip
+            // 3. Gerakan kamera
             if (clip.motionEffect != CameraMotionEffect.NONE) {
                 clipVideoEffects.add(
                     createCameraMotionEffect(
@@ -167,8 +188,8 @@ class VideoSequenceBuilder(private val context: Context) {
                 )
             }
 
-            clipVideoEffects.addAll(globalPostEffects)
-
+            // 4. Transition effects (fade, slide, zoom) — SEBELUM globalPostEffects
+            // supaya subtitle/watermark tidak terjejas oleh fade.
             if (finalClipChain.size > 1 && transitionConfig.transitionType != TransitionType.NONE) {
                 val transDurationUs = (transitionConfig.durationMs.coerceAtMost(finalPlayedDurationMs / 2L)) * 1000L
                 val fadeInUs = if (!isFirst && transDurationUs > 0L) transDurationUs else 0L
@@ -235,6 +256,9 @@ class VideoSequenceBuilder(private val context: Context) {
                 }
             }
 
+            // 5. Global post effects (crop, color, subtitle, watermark) — TERAKHIR
+            clipVideoEffects.addAll(globalPostEffects)
+
             val editedClip = if (clip.isImage) {
                 val resolvedMime = resolveImageMimeType(clip)
                 val imageItem = MediaItem.Builder()
@@ -244,7 +268,6 @@ class VideoSequenceBuilder(private val context: Context) {
                     .build()
 
                 EditedMediaItem.Builder(imageItem)
-                    .setDurationUs(clipDurationUs)
                     .setRemoveAudio(true)
                     .setFrameRate(exportConfig.frameRate.fps)
                     .setEffects(Effects(emptyList(), clipVideoEffects))
@@ -286,6 +309,7 @@ class VideoSequenceBuilder(private val context: Context) {
         }
 
         if (hasFreezeFrame) {
+            val safeFreezeMs = freezeFrameExtensionMs.coerceIn(100L, 10_000L)
             val lastClip = finalClipChain.last()
             val freezeUri = if (lastClip.isImage) {
                 lastClip.uri
@@ -299,34 +323,33 @@ class VideoSequenceBuilder(private val context: Context) {
             }
 
             if (freezeUri != null) {
-                val freezeStartUs = runningDurationMs * 1000L
-                val freezeDurationUs = freezeFrameExtensionMs * 1000L
+                val freezeDurationUs = safeFreezeMs * 1000L
 
                 val imageItem = MediaItem.Builder()
                     .setUri(freezeUri)
                     .setMimeType(freezeMime)
-                    .setImageDurationMs(freezeFrameExtensionMs)
+                    .setImageDurationMs(safeFreezeMs)
                     .build()
 
                 val freezeEffects = mutableListOf<Effect>()
                 if (lastClip.rotationDegrees != 0 || lastClip.isMirrored) {
+                    val normalizedRotation = ((lastClip.rotationDegrees % 360) + 360) % 360
                     freezeEffects.add(
                         ScaleAndRotateTransformation.Builder()
-                            .setRotationDegrees(lastClip.rotationDegrees.toFloat())
+                            .setRotationDegrees(normalizedRotation.toFloat())
                             .setScale(if (lastClip.isMirrored) -1f else 1f, 1f)
                             .build()
                     )
                 }
-                freezeEffects.addAll(globalPostEffects)
                 freezeEffects.add(
                     createSlowZoomEffect(
-                        clipStartUs = freezeStartUs,
+                        clipStartUs = 0L,
                         totalDurationUs = freezeDurationUs
                     )
                 )
+                freezeEffects.addAll(globalPostEffects)
 
                 val freezeEditedItem = EditedMediaItem.Builder(imageItem)
-                    .setDurationUs(freezeDurationUs)
                     .setRemoveAudio(true)
                     .setFrameRate(exportConfig.frameRate.fps)
                     .setEffects(Effects(emptyList(), freezeEffects))
@@ -340,7 +363,11 @@ class VideoSequenceBuilder(private val context: Context) {
     }
 
     private fun resolveImageMimeType(clip: VideoClip): String {
-        val raw = clip.mimeType ?: context.contentResolver.getType(clip.uri) ?: ""
+        val raw = try {
+            clip.mimeType ?: context.contentResolver.getType(clip.uri) ?: ""
+        } catch (_: Exception) {
+            clip.mimeType ?: ""
+        }
         return when {
             raw.contains("png", ignoreCase = true) -> MimeTypes.IMAGE_PNG
             raw.contains("webp", ignoreCase = true) -> MimeTypes.IMAGE_WEBP
@@ -471,7 +498,8 @@ class VideoSequenceBuilder(private val context: Context) {
             val localTimeUs = (presentationTimeUs - clipStartUs).coerceAtLeast(0L)
             if (localTimeUs in 0L until durationUs && durationUs > 0L) {
                 val progress = (localTimeUs.toFloat() / durationUs.toFloat()).coerceIn(0f, 1f)
-                val translateX = (1f - progress) * 2f
+                // Slide dari kanan: 1.0 (satu lebar skrin dalam NDC) → 0.0
+                val translateX = (1f - progress) * 1f
                 matrix.postTranslate(translateX, 0f)
             }
             matrix
@@ -485,31 +513,9 @@ class VideoSequenceBuilder(private val context: Context) {
             val targetTimeUs = ((clip.trimEndMs - 50L).coerceAtLeast(clip.trimStartMs)) * 1000L
             val bitmap = retriever.getFrameAtTime(
                 targetTimeUs,
-                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                MediaMetadataRetriever.OPTION_CLOSEST
             ) ?: return null
 
             val evenW = (bitmap.width / 2) * 2
             val evenH = (bitmap.height / 2) * 2
-            val cleanBitmap = if (evenW > 0 && evenH > 0 && (evenW != bitmap.width || evenH != bitmap.height)) {
-                Bitmap.createBitmap(bitmap, 0, 0, evenW, evenH).also {
-                    if (it != bitmap) bitmap.recycle()
-                }
-            } else {
-                bitmap
-            }
-            val tempFile = File(context.cacheDir, "freeze_frame_${System.nanoTime()}.png")
-            FileOutputStream(tempFile).use { out ->
-                cleanBitmap.compress(Bitmap.CompressFormat.PNG, 95, out)
-            }
-            cleanBitmap.recycle()
-            Uri.fromFile(tempFile)
-        } catch (_: Exception) {
-            null
-        } finally {
-            try {
-                retriever.release()
-            } catch (_: Exception) {
-            }
-        }
-    }
-}
+            val cleanBitmap = if (evenW > 0 && evenH > 0 && (evenW != bitmap.width || evenH != bitmap
