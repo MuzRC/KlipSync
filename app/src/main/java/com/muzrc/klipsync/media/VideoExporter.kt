@@ -1,3 +1,4 @@
+// VideoExporter.kt
 package com.muzrc.klipsync.media
 
 import android.content.Context
@@ -58,7 +59,6 @@ class VideoExporter(private val context: Context) {
                 "RustCore=${NativeCoreBridge.isNativeLoaded}"
         )
 
-        // Bersihkan fail sementara lama pada permulaan, bukan hanya akhir.
         cleanupTempExportFiles()
 
         send(ExportState.Exporting(1))
@@ -253,8 +253,6 @@ class VideoExporter(private val context: Context) {
                             }
                         }
 
-                        // Watchdog luaran: jika start() sendiri hang (contoh native stuck),
-                        // resume continuation selepas 90s.
                         startWatchdogJob = launch {
                             delay(90_000L)
                             if (isActive && continuation.isActive) {
@@ -349,7 +347,6 @@ class VideoExporter(private val context: Context) {
     }
 
     private fun computeTargetBitrate(shortEdge: Int, fps: Int): Int {
-        // Bitrate asas mengikut resolusi, di-skala dengan FPS.
         val base = when {
             shortEdge >= 1080 -> 5_500_000
             shortEdge >= 720 -> 3_200_000
@@ -445,14 +442,14 @@ class VideoExporter(private val context: Context) {
                 decoded.getPixels(srcPixels, 0, curW, 0, 0, curW, curH)
                 decoded.recycle()
 
-                val composedPixels = NativeCoreBridge.composeFitBlurArgbNative(
+                val composedPixels = NativeCoreBridge.composeFitBlurArgbSafe(
                     srcPixels = srcPixels,
                     srcWidth = curW,
                     srcHeight = curH,
                     canvasWidth = canvasW,
                     canvasHeight = canvasH
                 )
-                if (composedPixels.size == canvasW * canvasH) {
+                if (composedPixels != null && composedPixels.size == canvasW * canvasH) {
                     Bitmap.createBitmap(composedPixels, canvasW, canvasH, Bitmap.Config.ARGB_8888)
                 } else {
                     return null
@@ -474,14 +471,14 @@ class VideoExporter(private val context: Context) {
                         decoded.getPixels(srcPixels, 0, curW, 0, 0, curW, curH)
                         decoded.recycle()
 
-                        val resizedPixels = NativeCoreBridge.resizeArgbNative(
+                        val resizedPixels = NativeCoreBridge.resizeArgbSafe(
                             srcPixels = srcPixels,
                             srcWidth = curW,
                             srcHeight = curH,
                             dstWidth = targetW,
                             dstHeight = targetH
                         )
-                        if (resizedPixels.size == targetW * targetH) {
+                        if (resizedPixels != null && resizedPixels.size == targetW * targetH) {
                             Bitmap.createBitmap(resizedPixels, targetW, targetH, Bitmap.Config.ARGB_8888)
                         } else {
                             return null
@@ -507,8 +504,6 @@ class VideoExporter(private val context: Context) {
             val engineTag = if (NativeCoreBridge.isNativeLoaded) "Rust" else "Kotlin"
             ExportDebugLogger.log("COMPRESS[$engineTag]", "Gambar: ${rawW}x${rawH} -> ${outW}x${outH} (mode=${cropScaleMode.name})")
 
-            // Guna FileProvider untuk dapatkan content:// URI supaya Media3
-            // dan komponen lain boleh baca dengan selamat.
             FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.fileprovider",
