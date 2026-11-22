@@ -24,6 +24,9 @@ enum class BeatSensitivity(
 
 object BeatDetector {
 
+    private const val TAG = "BEAT_DETECT"
+    private const val MAX_IDLE_ITERATIONS = 2000
+
     suspend fun detectBeats(
         context: Context,
         uri: Uri,
@@ -65,6 +68,9 @@ object BeatDetector {
                 2
             }
 
+            // Nota: seekTo dibuat SEBELUM codec.start(), jadi tidak perlu flush.
+            // Timestamp hasil akan relatif kepada fail asal (bukan offset),
+            // kerana decoder akan mula decode pada sync point terdekat.
             if (startOffsetMs > 0L) {
                 extractor.seekTo(startOffsetMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
             }
@@ -73,18 +79,21 @@ object BeatDetector {
             codec.configure(audioFormat, null, null, 0)
             codec.start()
 
-            // Kumpulkan sampel PCM 16-bit untuk diproses terus oleh teras Rust DSP
             val chunks = ArrayList<ShortArray>(256)
             var totalShorts = 0
 
             val bufferInfo = MediaCodec.BufferInfo()
             var isInputDone = false
             var isOutputDone = false
+            var idleIterations = 0
 
             while (!isOutputDone) {
+                var progress = false
+
                 if (!isInputDone) {
                     val inIndex = codec.dequeueInputBuffer(5000L)
                     if (inIndex >= 0) {
+                        progress = true
                         val inputBuffer = codec.getInputBuffer(inIndex)
                         if (inputBuffer != null) {
                             val sampleSize = extractor.readSampleData(inputBuffer, 0)
@@ -105,6 +114,7 @@ object BeatDetector {
 
                 val outIndex = codec.dequeueOutputBuffer(bufferInfo, 5000L)
                 if (outIndex >= 0) {
+                    progress = true
                     val outBuffer = codec.getOutputBuffer(outIndex)
                     if (outBuffer != null && bufferInfo.size > 0) {
                         outBuffer.position(bufferInfo.offset)
@@ -123,6 +133,15 @@ object BeatDetector {
                     if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                         isOutputDone = true
                     }
+                }
+
+                if (!progress) {
+                    if (++idleIterations > MAX_IDLE_ITERATIONS) {
+                        ExportDebugLogger.log(TAG, "Timeout selepas $idleIterations iterasi idle")
+                        break
+                    }
+                } else {
+                    idleIterations = 0
                 }
             }
 
@@ -150,11 +169,17 @@ object BeatDetector {
                     "RUST_DSP",
                     "Auto-Beat Rust selesai dalam ${elapsedMs}ms (${nativeResult.size} beat dikesan)"
                 )
+                // Nota: timestamp native adalah relatif kepada sampel yang
+                // decoded. Jika startOffsetMs > 0, decoder bermula pada sync
+                // point terdekat, jadi timestamp adalah relatif kepada fail.
+                // Jika anda perlukan timestamp relatif kepada offset, tambah
+                // startOffsetMs di sini.
                 return@withContext nativeResult.toList()
             }
 
             detectBeatsKotlinFallback(fullPcm, sampleRate, channelCount, sensitivity)
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            ExportDebugLogger.log(TAG, "Gagal detect beat: ${t.message}")
             emptyList()
         } finally {
             try {
@@ -184,8 +209,13 @@ object BeatDetector {
 
         var idx = 0
         while (idx + channelCount <= pcm.size) {
-            val norm = pcm[idx] / 32768.0
-            currentWindowSumSq += norm * norm
+            // Purata RMS merentasi semua channel untuk sensitiviti lebih baik
+            var frameSumSq = 0.0
+            for (ch in 0 until channelCount) {
+                val norm = pcm[idx + ch] / 32768.0
+                frameSumSq += norm * norm
+            }
+            currentWindowSumSq += frameSumSq / channelCount
             currentWindowCount++
             totalFramesProcessed++
 
