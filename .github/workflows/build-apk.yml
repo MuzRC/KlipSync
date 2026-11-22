@@ -26,12 +26,6 @@ jobs:
         run: |
           TOTAL_COMMITS=$(git rev-list --count HEAD)
 
-          # Formula versi yang konsisten menaik.
-          # 99 commit  -> 1.0.99
-          # 100 commit -> 1.0.0 (TIDAK) -> kita guna MAJOR.MINOR.PATCH menaik.
-          # Formula: MAJOR = TOTAL_COMMITS / 100
-          #          MINOR = (TOTAL_COMMITS / 10) % 10
-          #          PATCH = TOTAL_COMMITS % 10
           if [ "$TOTAL_COMMITS" -ge 100 ]; then
             MAJOR=$((TOTAL_COMMITS / 100))
             MINOR=$(((TOTAL_COMMITS / 10) % 10))
@@ -41,11 +35,8 @@ jobs:
             APP_VERSION="1.0.${TOTAL_COMMITS}"
           fi
 
-          # Tulis ke GITHUB_ENV untuk step seterusnya
           echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
           echo "VERSION_CODE=$TOTAL_COMMITS" >> $GITHUB_ENV
-
-          # PENTING: export untuk step yang SAMA (python3 di bawah)
           export APP_VERSION
           export VERSION_CODE
 
@@ -54,7 +45,6 @@ jobs:
           python3 - << 'EOF'
           import json, os, subprocess, urllib.request
 
-          # APP_VERSION dan VERSION_CODE kini tersedia kerana `export`
           app_ver = os.environ["APP_VERSION"]
           token = os.environ["GITHUB_TOKEN"]
 
@@ -122,15 +112,30 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
 
-      - name: 3b. Pasang Rust Toolchain & Sasaran Android
+      - name: 3b. Setup Rust Toolchain & Sasaran Android
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi
+
+      # ===== CACHE: Rust Cargo =====
+      - name: 3b-1. Cache Rust Cargo & Target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            app/src/main/rust/target
+          key: rust-cargo-${{ runner.os }}-${{ hashFiles('app/src/main/rust/Cargo.lock') }}
+          restore-keys: |
+            rust-cargo-${{ runner.os }}-
 
       - name: 3c. Pasang cargo-ndk & Kompilasi Teras Rust
         run: |
           if ! command -v cargo-ndk >/dev/null 2>&1; then
             cargo install cargo-ndk
+          else
+            echo "cargo-ndk sudah wujud (dari cache)."
           fi
           if [ -d "app/src/main/rust" ]; then
             cd app/src/main/rust
@@ -154,6 +159,17 @@ jobs:
             echo "ERROR: build.gradle(.kts) tidak dijumpai."
             exit 1
           fi
+
+      # ===== CACHE: Gradle =====
+      - name: 4b. Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
 
       - name: 5. Sediakan Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -199,13 +215,11 @@ jobs:
           BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
           echo "Build-Tools Digunakan: $BUILD_TOOLS"
 
-          # Cari APK yang belum di-sign (unsigned atau release yang bukan signed)
           UNSIGNED_APK=$(find "$APK_DIR" -type f -name "*.apk" \
             -not -name "*-signed.apk" -not -name "aligned.apk" \
             \( -name "*unsigned.apk" -o -name "*-release.apk" -o -name "*-release-unsigned.apk" \) \
             | head -n 1)
 
-          # Fallback jika pattern khusus tiada
           if [ -z "$UNSIGNED_APK" ]; then
             UNSIGNED_APK=$(find "$APK_DIR" -type f -name "*.apk" \
               -not -name "*-signed.apk" -not -name "aligned.apk" | head -n 1)
