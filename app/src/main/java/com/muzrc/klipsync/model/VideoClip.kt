@@ -29,16 +29,39 @@ data class VideoClip(
     val motionEffect: CameraMotionEffect = CameraMotionEffect.NONE,
     val motionIntensity: Float = 0.20f // Julat 0.05f (5%) hingga 0.50f (50%)
 ) {
+    init {
+        require(originalDurationMs >= 0L) {
+            "originalDurationMs mesti >= 0 (dapat $originalDurationMs)"
+        }
+        require(trimStartMs >= 0L) {
+            "trimStartMs mesti >= 0 (dapat $trimStartMs)"
+        }
+        require(trimEndMs >= trimStartMs) {
+            "trimEndMs ($trimEndMs) mesti >= trimStartMs ($trimStartMs)"
+        }
+    }
+
+    val clampedSpeed: Float
+        get() = speed.coerceIn(0.25f, 4.0f)
+
+    val clampedLoopCount: Int
+        get() = loopCount.coerceAtLeast(1)
+
+    val clampedMotionIntensity: Float
+        get() = motionIntensity.coerceIn(0.05f, 0.50f)
+
+    val normalizedRotationDegrees: Int
+        get() = ((rotationDegrees % 360) + 360) % 360
+
     val rawTrimmedDurationMs: Long
         get() = (trimEndMs - trimStartMs).coerceAtLeast(0L)
 
     val singlePlayDurationMs: Long
         get() {
             if (isImage) return rawTrimmedDurationMs
-            val safeSpeed = speed.coerceIn(0.25f, 4.0f)
-            return (rawTrimmedDurationMs / safeSpeed).toLong().coerceAtLeast(0L)
+            return (rawTrimmedDurationMs / clampedSpeed).toLong().coerceAtLeast(0L)
         }
 
     val effectiveDurationMs: Long
-        get() = singlePlayDurationMs * loopCount.coerceAtLeast(1)
+        get() = singlePlayDurationMs * clampedLoopCount
 }
