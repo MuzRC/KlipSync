@@ -268,16 +268,16 @@ object DraftStorageManager {
             val transitionConfig = TransitionConfig(
                 joinMode = enumOrDefault(transJson.optString("joinMode"), JoinMode.SEQUENTIAL),
                 transitionType = enumOrDefault(transJson.optString("transitionType"), TransitionType.NONE),
-                durationMs = transJson.optLong("durationMs", 800L),
+                durationMs = transJson.optLong("durationMs", 800L).coerceIn(0L, 3_000L),
                 endBehavior = enumOrDefault(transJson.optString("endBehavior"), VideoEndBehavior.FREEZE_FRAME)
             )
 
             val colorJson = json.optJSONObject("color") ?: JSONObject()
             val colorConfig = ColorFilterConfig(
                 preset = enumOrDefault(colorJson.optString("preset"), ColorFilterPreset.NONE),
-                brightness = colorJson.optDouble("brightness", 0.0).toFloat(),
-                contrast = colorJson.optDouble("contrast", 1.0).toFloat(),
-                saturation = colorJson.optDouble("saturation", 1.0).toFloat()
+                brightness = colorJson.optDouble("brightness", 0.0).toFloat().coerceIn(-0.5f, 0.5f),
+                contrast = colorJson.optDouble("contrast", 1.0).toFloat().coerceIn(0.5f, 1.5f),
+                saturation = colorJson.optDouble("saturation", 1.0).toFloat().coerceIn(0f, 2f)
             )
 
             val clips = mutableListOf<VideoClip>()
@@ -286,24 +286,31 @@ object DraftStorageManager {
                 val c = clipsArr.getJSONObject(i)
                 val uriStr = c.optString("uri")
                 if (uriStr.isNotBlank()) {
+                    val rawOriginalDur = c.optLong("originalDurationMs", 0L).coerceAtLeast(0L)
+                    val rawTrimStart = c.optLong("trimStartMs", 0L).coerceIn(0L, rawOriginalDur)
+                    val rawTrimEnd = c.optLong("trimEndMs", rawOriginalDur)
+                        .coerceIn(rawTrimStart, rawOriginalDur)
+
                     clips.add(
                         VideoClip(
-                            id = c.optString("id"),
+                            id = c.optString("id").ifBlank { java.util.UUID.randomUUID().toString() },
                             uri = Uri.parse(uriStr),
                             displayName = c.optString("displayName", "Clip_${i + 1}"),
-                            originalDurationMs = c.optLong("originalDurationMs", 0L),
-                            trimStartMs = c.optLong("trimStartMs", 0L),
-                            trimEndMs = c.optLong("trimEndMs", 0L),
-                            loopCount = c.optInt("loopCount", 1),
-                            speed = c.optDouble("speed", 1.0).toFloat(),
+                            originalDurationMs = rawOriginalDur,
+                            trimStartMs = rawTrimStart,
+                            trimEndMs = rawTrimEnd,
+                            loopCount = c.optInt("loopCount", 1).coerceIn(1, 20),
+                            speed = c.optDouble("speed", 1.0).toFloat().coerceIn(0.25f, 4.0f),
                             rotationDegrees = c.optInt("rotationDegrees", 0),
                             isMirrored = c.optBoolean("isMirrored", false),
-                            width = c.optInt("width", 1080),
-                            height = c.optInt("height", 1920),
+                            width = c.optInt("width", 1080).coerceAtLeast(1),
+                            height = c.optInt("height", 1920).coerceAtLeast(1),
                             isImage = c.optBoolean("isImage", false),
                             mimeType = c.optString("mimeType").ifBlank { null },
                             motionEffect = enumOrDefault(c.optString("motionEffect"), CameraMotionEffect.NONE),
-                            motionIntensity = c.optDouble("motionIntensity", 0.20).toFloat()
+                            motionIntensity = c.optDouble("motionIntensity", 0.20)
+                                .toFloat()
+                                .coerceIn(0.05f, 0.50f)
                         )
                     )
                 }
@@ -324,17 +331,25 @@ object DraftStorageManager {
                 emptyList()
             }
 
+            val rawTotalDur = audioJson.optLong("totalDurationMs", 0L).coerceAtLeast(0L)
+            val rawStartOffset = audioJson.optLong("startOffsetMs", 0L)
+                .coerceIn(0L, rawTotalDur)
+
             val audioConfig = AudioTrackConfig(
                 uri = parsedAudioUri,
                 displayName = audioJson.optString("displayName", ""),
                 isExtractedFromVideo = audioJson.optBoolean("isExtractedFromVideo", false),
-                totalDurationMs = audioJson.optLong("totalDurationMs", 0L),
-                startOffsetMs = audioJson.optLong("startOffsetMs", 0L),
+                totalDurationMs = rawTotalDur,
+                startOffsetMs = rawStartOffset,
                 isOriginalAudioMuted = audioJson.optBoolean("isOriginalAudioMuted", true),
-                originalVideoVolume = audioJson.optDouble("originalVideoVolume", 0.0).toFloat(),
-                musicVolume = audioJson.optDouble("musicVolume", 1.0).toFloat(),
-                fadeInDurationMs = audioJson.optLong("fadeInDurationMs", 0L),
-                fadeOutDurationMs = audioJson.optLong("fadeOutDurationMs", 0L),
+                originalVideoVolume = audioJson.optDouble("originalVideoVolume", 0.0)
+                    .toFloat()
+                    .coerceIn(0f, 2f),
+                musicVolume = audioJson.optDouble("musicVolume", 1.0)
+                    .toFloat()
+                    .coerceIn(0f, 2f),
+                fadeInDurationMs = audioJson.optLong("fadeInDurationMs", 0L).coerceAtLeast(0L),
+                fadeOutDurationMs = audioJson.optLong("fadeOutDurationMs", 0L).coerceAtLeast(0L),
                 waveformPeaks = peaks,
                 beatMarkersMs = beats
             )
@@ -343,14 +358,18 @@ object DraftStorageManager {
             val subsArr = json.optJSONArray("subtitles") ?: JSONArray()
             for (i in 0 until subsArr.length()) {
                 val s = subsArr.getJSONObject(i)
+                val rawStart = s.optLong("startMs", 0L).coerceAtLeast(0L)
+                val rawEnd = s.optLong("endMs", rawStart + 1000L)
+                    .coerceAtLeast(rawStart + 100L)
+
                 subtitles.add(
                     SubtitleItem(
-                        id = s.optString("id"),
+                        id = s.optString("id").ifBlank { java.util.UUID.randomUUID().toString() },
                         text = s.optString("text"),
-                        startMs = s.optLong("startMs", 0L),
-                        endMs = s.optLong("endMs", 1000L),
+                        startMs = rawStart,
+                        endMs = rawEnd,
                         fontFamily = enumOrDefault(s.optString("fontFamily"), SubtitleFontFamily.SANS_SERIF),
-                        fontSizeSp = s.optDouble("fontSizeSp", 22.0).toFloat(),
+                        fontSizeSp = s.optDouble("fontSizeSp", 22.0).toFloat().coerceIn(8f, 72f),
                         textColorHex = s.optLong("textColorHex", 0xFFFFFFFF),
                         hasDarkBackground = s.optBoolean("hasDarkBackground", true),
                         position = enumOrDefault(s.optString("position"), SubtitlePosition.BOTTOM)
@@ -363,8 +382,12 @@ object DraftStorageManager {
             val watermarkConfig = WatermarkConfig(
                 uri = if (wmUriStr.isNotBlank()) Uri.parse(wmUriStr) else null,
                 displayName = wmJson.optString("displayName", ""),
-                scalePercent = wmJson.optDouble("scalePercent", 0.22).toFloat(),
-                opacity = wmJson.optDouble("opacity", 0.85).toFloat(),
+                scalePercent = wmJson.optDouble("scalePercent", 0.22)
+                    .toFloat()
+                    .coerceIn(0.10f, 0.50f),
+                opacity = wmJson.optDouble("opacity", 0.85)
+                    .toFloat()
+                    .coerceIn(0.15f, 1.0f),
                 position = enumOrDefault(wmJson.optString("position"), WatermarkPosition.TOP_RIGHT)
             )
 
