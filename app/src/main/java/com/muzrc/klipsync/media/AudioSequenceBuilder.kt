@@ -19,11 +19,10 @@ object AudioSequenceBuilder {
         val uri = audioConfig.uri ?: return null
         val effectiveDurationMs = audioConfig.effectiveAudioDurationMs
         if (effectiveDurationMs <= 0L) return null
+        if (!audioConfig.hasValidOffset) return null
 
         val startMs = audioConfig.startOffsetMs.coerceAtLeast(0L)
         val endMs = audioConfig.totalDurationMs
-
-        // Validasi: clipping tidak boleh negatif atau sifar
         if (endMs <= startMs) return null
 
         val clippingConfig = MediaItem.ClippingConfiguration.Builder()
@@ -36,11 +35,12 @@ object AudioSequenceBuilder {
             .setClippingConfiguration(clippingConfig)
             .build()
 
+        // Guna nilai yang sudah di-clamp dalam model.
         val volumeProcessor = VolumeFadeAudioProcessor(
-            targetVolume = audioConfig.musicVolume.coerceIn(0f, 1.5f),
+            targetVolume = audioConfig.clampedMusicVolume,
             totalDurationMs = effectiveDurationMs,
-            fadeInMs = audioConfig.fadeInDurationMs.coerceAtLeast(0L),
-            fadeOutMs = audioConfig.fadeOutDurationMs.coerceAtLeast(0L)
+            fadeInMs = audioConfig.safeFadeInMs,
+            fadeOutMs = audioConfig.safeFadeOutMs
         )
 
         val editedAudio = EditedMediaItem.Builder(mediaItem)
@@ -68,17 +68,12 @@ object AudioSequenceBuilder {
     ) : BaseAudioProcessor() {
 
         private var processedFrames: Long = 0L
-
-        // Simpan baki byte yang tidak lengkap (frame separuh) untuk diproses
-        // bersama buffer seterusnya. Ini mengelak output rosak.
         private var pendingByte: Byte? = null
 
         override fun onConfigure(
             inputAudioFormat: AudioProcessor.AudioFormat
         ): AudioProcessor.AudioFormat {
             if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
-                // Kembalikan NOT_SET supaya chain tidak crash; Transformer
-                // akan skip processor ini jika format tidak disokong.
                 return AudioProcessor.AudioFormat.NOT_SET
             }
             return inputAudioFormat
@@ -102,17 +97,11 @@ object AudioSequenceBuilder {
             val sampleRate = inputAudioFormat.sampleRate.coerceAtLeast(1)
             val bytesPerFrame = channelCount * 2
 
-            // Kira saiz output: baki byte + remaining, dibundarkan ke bawah
-            // ke gandaan bytesPerFrame, ditambah baki baru (jika ada).
             val totalAvailable = remaining + (if (pendingByte != null) 1 else 0)
             val completeBytes = (totalAvailable / bytesPerFrame) * bytesPerFrame
-            val newPendingCount = totalAvailable - completeBytes
 
             val outBuffer = replaceOutputBuffer(completeBytes)
             if (completeBytes == 0) {
-                // Simpan semua sebagai pending
-                pendingByte?.let { outBuffer.put(it) } // tidak sepatutnya berlaku
-                // Simpan balik ke pending (hanya 1 byte mungkin)
                 if (remaining > 0) {
                     pendingByte = inputBuffer.get()
                 }
@@ -120,7 +109,6 @@ object AudioSequenceBuilder {
                 return
             }
 
-            // Bina buffer kerja sementara jika ada pending byte
             val workBuffer: ByteBuffer
             if (pendingByte != null) {
                 workBuffer = ByteBuffer.allocate(totalAvailable)
@@ -134,7 +122,6 @@ object AudioSequenceBuilder {
                 workBuffer = inputBuffer
             }
 
-            // Proses frame lengkap
             while (workBuffer.remaining() >= bytesPerFrame) {
                 val currentTimeMs = (processedFrames * 1000L) / sampleRate
                 val gain = computeGainAt(currentTimeMs)
@@ -150,7 +137,6 @@ object AudioSequenceBuilder {
                 processedFrames++
             }
 
-            // Simpan baki byte baru (jika ada) untuk buffer seterusnya
             if (workBuffer.hasRemaining()) {
                 pendingByte = workBuffer.get()
             }
