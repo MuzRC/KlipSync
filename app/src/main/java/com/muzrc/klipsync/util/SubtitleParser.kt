@@ -26,20 +26,17 @@ object SubtitleParser {
         } ?: return@withContext emptyList()
 
         if (NativeCoreBridge.isNativeLoaded) {
-            val encodedRows = NativeCoreBridge.parseSubtitlesNative(rawText, fallbackEndDurationMs)
-            if (encodedRows.isNotEmpty()) {
-                val parsed = encodedRows.mapNotNull { row ->
-                    val firstSep = row.indexOf('|')
-                    val secondSep = if (firstSep != -1) row.indexOf('|', firstSep + 1) else -1
-                    if (firstSep != -1 && secondSep != -1) {
-                        val sMs = row.substring(0, firstSep).toLongOrNull() ?: 0L
-                        val eMs = row.substring(firstSep + 1, secondSep).toLongOrNull() ?: (sMs + 2000L)
-                        val txt = row.substring(secondSep + 1)
-                        if (txt.isNotBlank()) SubtitleItem(text = txt, startMs = sMs, endMs = eMs) else null
-                    } else {
-                        null
+            val parsedLines = NativeCoreBridge.parseSubtitlesSafe(rawText, fallbackEndDurationMs)
+            if (parsedLines.isNotEmpty()) {
+                val parsed = parsedLines
+                    .filter { it.text.isNotBlank() && it.endMs >= it.startMs }
+                    .map { line ->
+                        SubtitleItem(
+                            text = line.text,
+                            startMs = line.startMs,
+                            endMs = line.endMs
+                        )
                     }
-                }
                 if (parsed.isNotEmpty()) {
                     return@withContext parsed
                 }
