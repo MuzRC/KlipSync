@@ -13,16 +13,17 @@ import com.muzrc.klipsync.ui.theme.KlipSyncTheme
 import com.muzrc.klipsync.viewmodel.EditorViewModel
 
 class MainActivity : ComponentActivity() {
+    private val editorViewModel: EditorViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT)
         )
         setContent {
             KlipSyncTheme {
-                val editorViewModel: EditorViewModel = viewModel()
                 EditorScreen(viewModel = editorViewModel)
             }
         }
