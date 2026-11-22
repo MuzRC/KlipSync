@@ -22,7 +22,6 @@ object WatermarkOverlayBuilder {
     fun buildWatermarkEffect(context: Context, config: WatermarkConfig): Effect? {
         val uri = config.uri ?: return null
         val sourceBitmap = try {
-            // Buka stream sekali sahaja untuk elak isu permission sementara.
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 ?: return null
 
@@ -62,11 +61,11 @@ object WatermarkOverlayBuilder {
             videoWidth = videoSize.width.coerceAtLeast(1)
             videoHeight = videoSize.height.coerceAtLeast(1)
 
-            // Jangan recycle composedBitmap lama — ia mungkin masih digunakan
-            // oleh GPU. Biarkan GC handle.
+            // Jangan recycle bitmap lama; ia mungkin masih di GPU.
             composedBitmap = null
 
-            val targetLogoW = (videoWidth * config.scalePercent.coerceIn(0.08f, 0.6f))
+            // Guna nilai yang sudah di-clamp dalam model.
+            val targetLogoW = (videoWidth * config.clampedScalePercent)
                 .roundToInt()
                 .coerceAtLeast(24)
             val aspect = rawLogo.height.toFloat() / rawLogo.width.coerceAtLeast(1).toFloat()
@@ -91,7 +90,7 @@ object WatermarkOverlayBuilder {
             }
 
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                alpha = (config.opacity.coerceIn(0.1f, 1.0f) * 255).roundToInt()
+                alpha = (config.clampedOpacity * 255).roundToInt()
             }
 
             canvas.drawBitmap(scaledLogo, left, top, paint)
@@ -104,10 +103,6 @@ object WatermarkOverlayBuilder {
 
         override fun getBitmap(presentationTimeUs: Long): Bitmap {
             composedBitmap?.let { return it }
-
-            // Fallback: jika configure() belum dipanggil (atau gagal), pulangkan
-            // bitmap kosong dengan saiz video supaya tidak menyebabkan watermark
-            // muncul di posisi yang salah.
             val fallbackW = videoWidth.coerceAtLeast(1)
             val fallbackH = videoHeight.coerceAtLeast(1)
             return Bitmap.createBitmap(fallbackW, fallbackH, Bitmap.Config.ARGB_8888)
