@@ -70,6 +70,7 @@ class MediaMetadataReader(private val context: Context) {
         var durationMs = 0L
         var width = 1080
         var height = 1920
+        var detectedMime = "video/mp4"
 
         try {
             retriever.setDataSource(context, uri)
@@ -96,6 +97,8 @@ class MediaMetadataReader(private val context: Context) {
                 width = rawWidth
                 height = rawHeight
             }
+
+            detectedMime = context.contentResolver.getType(uri) ?: detectedMime
         } catch (_: Exception) {
         } finally {
             try {
@@ -113,7 +116,7 @@ class MediaMetadataReader(private val context: Context) {
             width = width,
             height = height,
             isImage = false,
-            mimeType = "video/mp4"
+            mimeType = detectedMime
         )
     }
 
@@ -158,11 +161,14 @@ class MediaMetadataReader(private val context: Context) {
 
     fun resolveDisplayName(uri: Uri): String? {
         if (uri.scheme == "content") {
-            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (nameIndex != -1 && cursor.moveToFirst()) {
-                    return cursor.getString(nameIndex)
+            try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1 && cursor.moveToFirst()) {
+                        return cursor.getString(nameIndex)
+                    }
                 }
+            } catch (_: Exception) {
             }
         }
         return uri.lastPathSegment?.substringAfterLast('/')
