@@ -18,7 +18,6 @@ object CropEffectBuilder {
         scaleMode: CropScaleMode,
         exportConfig: ExportConfig
     ): List<Effect> {
-        // Saiz sisi pendek (genap) untuk output.
         val shortEdge = ((exportConfig.resolution.shortEdgePx / 2) * 2)
             .coerceAtLeast(MIN_SHORT_EDGE_PX)
 
@@ -29,16 +28,12 @@ object CropEffectBuilder {
             return listOf(Presentation.createForHeight(shortEdge))
         }
 
-        // Kira dimensi output berdasarkan ratio, tanpa clamp berasingan
-        // supaya aspect ratio tidak rosak.
         val targetWidth: Int
         val targetHeight: Int
         if (targetRatio >= 1f) {
-            // Landscape atau square
             targetHeight = shortEdge
             targetWidth = evenUp((shortEdge * targetRatio).roundToInt())
         } else {
-            // Portrait
             targetWidth = shortEdge
             targetHeight = evenUp((shortEdge / targetRatio).roundToInt())
         }
@@ -49,6 +44,14 @@ object CropEffectBuilder {
                     targetWidth,
                     targetHeight,
                     Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
+                )
+            )
+
+            CropScaleMode.FIT -> listOf(
+                Presentation.createForWidthAndHeight(
+                    targetWidth,
+                    targetHeight,
+                    Presentation.LAYOUT_SCALE_TO_FIT
                 )
             )
 
