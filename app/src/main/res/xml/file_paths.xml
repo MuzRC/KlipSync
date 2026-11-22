@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Cache directory (tempat VideoExporter simpan gambar sementara & freeze frame) -->
+    <cache-path
+        name="cache"
+        path="." />
+
+    <!-- Files directory (jika perlu untuk simpanan kekal) -->
+    <files-path
+        name="files"
+        path="." />
+
+    <!-- External cache (jika perlu) -->
+    <external-cache-path
+        name="external_cache"
+        path="." />
+</paths>
