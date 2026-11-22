@@ -22,7 +22,29 @@ data class SubtitleItem(
     val endMs: Long,
     val fontFamily: SubtitleFontFamily = SubtitleFontFamily.SANS_SERIF,
     val fontSizeSp: Float = 22f,
-    val textColorHex: Long = 0xFFFFFFFF,
+    val textColorHex: Long = 0xFFFFFFFF, // ARGB Long (contoh 0xFFFFFFFF = putih penuh)
     val hasDarkBackground: Boolean = true,
     val position: SubtitlePosition = SubtitlePosition.BOTTOM
-)
+) {
+    init {
+        require(startMs >= 0L) {
+            "startMs mesti >= 0 (dapat $startMs)"
+        }
+        require(endMs >= startMs) {
+            "endMs ($endMs) mesti >= startMs ($startMs)"
+        }
+    }
+
+    val durationMs: Long
+        get() = endMs - startMs
+
+    val clampedFontSizeSp: Float
+        get() = fontSizeSp.coerceIn(8f, 72f)
+
+    /** ARGB Int untuk digunakan dengan Paint/TextPaint. */
+    val textColorArgb: Int
+        get() = textColorHex.toInt()
+
+    val hasValidText: Boolean
+        get() = text.isNotBlank() && durationMs > 0L
+}
