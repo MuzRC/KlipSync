@@ -1,3 +1,4 @@
+// AudioWaveformExtractor.kt
 package com.muzrc.klipsync.media
 
 import android.content.Context
@@ -61,9 +62,6 @@ object AudioWaveformExtractor {
             var isOutputDone = false
             var idleIterations = 0
 
-            // Nota: kita tidak guna seekTo dalam loop kerana ia menyebabkan
-            // sampel tidak berterusan dan decoder state tidak konsisten.
-            // Untuk waveform, kita proses semua sampel secara berurutan.
             while (!isOutputDone) {
                 var progress = false
 
@@ -112,7 +110,6 @@ object AudioWaveformExtractor {
                     }
                 }
 
-                // Timeout keseluruhan untuk elak hang
                 if (!progress) {
                     if (++idleIterations > MAX_IDLE_ITERATIONS) {
                         ExportDebugLogger.log(TAG, "Timeout selepas $idleIterations iterasi idle")
@@ -134,16 +131,15 @@ object AudioWaveformExtractor {
             chunks.clear()
 
             if (NativeCoreBridge.isNativeLoaded) {
-                val nativePeaks = NativeCoreBridge.extractWaveformPeaksNative(
+                val nativePeaks = NativeCoreBridge.extractWaveformPeaksSafe(
                     pcmSamples = combinedPcm,
                     targetBars = safeBars
                 )
-                if (nativePeaks.isNotEmpty()) {
+                if (nativePeaks != null && nativePeaks.isNotEmpty()) {
                     return@withContext nativePeaks.toList()
                 }
             }
 
-            // Fallback Kotlin
             buildBucketPeaks(combinedPcm, safeBars)
         } catch (t: Throwable) {
             ExportDebugLogger.log(TAG, "Gagal extract waveform: ${t.message}")
@@ -165,7 +161,6 @@ object AudioWaveformExtractor {
         if (pcm.isEmpty() || safeBars <= 0) return emptyList()
 
         val bucketPeaks = FloatArray(safeBars)
-        // Jika sampel kurang daripada bilangan bar, setiap bar ambil 1 sampel.
         val step = (pcm.size / safeBars).coerceAtLeast(1)
 
         for (b in 0 until safeBars) {
