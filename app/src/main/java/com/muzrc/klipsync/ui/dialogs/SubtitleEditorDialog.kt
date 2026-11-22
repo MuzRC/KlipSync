@@ -159,7 +159,7 @@ fun SubtitleEditorDialog(
                             modifier = Modifier
                                 .size(30.dp)
                                 .clip(CircleShape)
-                                .background(Color(hex))
+                                .background(Color(hex.toInt()))
                                 .border(
                                     width = if (isSelected) 3.dp else 1.dp,
                                     color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
@@ -198,16 +198,21 @@ fun SubtitleEditorDialog(
             TextButton(
                 enabled = text.isNotBlank(),
                 onClick = {
-                    val saved = (initialItem ?: SubtitleItem(
+                    val safeStart = startMs.coerceAtLeast(0L)
+                    val safeEnd = endMs.coerceAtLeast(safeStart + 200L)
+
+                    val baseItem = initialItem ?: SubtitleItem(
                         text = text.trim(),
-                        startMs = startMs,
-                        endMs = endMs
-                    )).copy(
+                        startMs = safeStart,
+                        endMs = safeEnd
+                    )
+
+                    val saved = baseItem.copy(
                         text = text.trim(),
-                        startMs = startMs,
-                        endMs = endMs.coerceAtLeast(startMs + 200L),
+                        startMs = safeStart,
+                        endMs = safeEnd,
                         fontFamily = fontFamily,
-                        fontSizeSp = fontSizeSp,
+                        fontSizeSp = fontSizeSp.coerceIn(8f, 72f),
                         textColorHex = selectedColorHex,
                         hasDarkBackground = hasDarkBackground,
                         position = position
