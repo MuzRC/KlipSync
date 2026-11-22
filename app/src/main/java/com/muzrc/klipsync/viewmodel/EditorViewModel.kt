@@ -1063,7 +1063,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     // --- Semak Kemas Kini Manual ---
     fun checkForUpdatesManual() {
         viewModelScope.launch {
-            _uiState.update { it.copy(updateCheckState = UpdateCheckState.Checking) }
+            _uiState.update { it.copy(updateCheckState = UpdateCheckState.Checking()) }
             val result = UpdateChecker.checkForUpdates()
             _uiState.update { it.copy(updateCheckState = result) }
         }
