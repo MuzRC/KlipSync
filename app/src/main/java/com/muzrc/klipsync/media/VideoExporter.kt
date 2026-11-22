@@ -25,6 +25,7 @@ import androidx.media3.transformer.VideoEncoderSettings
 import com.muzrc.klipsync.model.AspectRatioPreset
 import com.muzrc.klipsync.model.CropScaleMode
 import com.muzrc.klipsync.model.EditorUiState
+import com.muzrc.klipsync.model.ExportStage
 import com.muzrc.klipsync.model.ExportState
 import com.muzrc.klipsync.model.VideoClip
 import com.muzrc.klipsync.nativecore.NativeCoreBridge
@@ -61,7 +62,7 @@ class VideoExporter(private val context: Context) {
 
         cleanupTempExportFiles()
 
-        send(ExportState.Exporting(1))
+        send(ExportState.Exporting(1, ExportStage.PREPARING))
 
         if (state.clips.isEmpty()) {
             ExportDebugLogger.logError("EXPORT", "Tiada klip video atau gambar dipilih.")
@@ -85,7 +86,7 @@ class VideoExporter(private val context: Context) {
             )
             val safeState = state.copy(clips = preparedClips)
 
-            send(ExportState.Exporting(3))
+            send(ExportState.Exporting(3, ExportStage.ENCODING))
 
             val sequences = mutableListOf<EditedMediaItemSequence>()
 
@@ -225,14 +226,21 @@ class VideoExporter(private val context: Context) {
 
                                 if (currentPercent != lastReportedPercent) {
                                     lastReportedPercent = currentPercent
-                                    trySend(ExportState.Exporting(lastReportedPercent))
+                                    trySend(
+                                        ExportState.Exporting(lastReportedPercent, ExportStage.ENCODING)
+                                    )
                                 } else if (lastReportedPercent < 8 && (now - lastProgressChangeRealtimeMs) > 2000L) {
                                     lastReportedPercent += 1
-                                    trySend(ExportState.Exporting(lastReportedPercent))
+                                    trySend(
+                                        ExportState.Exporting(lastReportedPercent, ExportStage.ENCODING)
+                                    )
                                 }
 
                                 if ((now - lastProgressChangeRealtimeMs) > 45_000L) {
-                                    ExportDebugLogger.logError("WATCHDOG", "Timeout > 45s pada $lastReportedPercent%, fileSize=$curSize")
+                                    ExportDebugLogger.logError(
+                                        "WATCHDOG",
+                                        "Timeout > 45s pada $lastReportedPercent%, fileSize=$curSize"
+                                    )
                                     try {
                                         transformer.cancel()
                                     } catch (_: Throwable) {
@@ -256,7 +264,10 @@ class VideoExporter(private val context: Context) {
                         startWatchdogJob = launch {
                             delay(90_000L)
                             if (isActive && continuation.isActive) {
-                                ExportDebugLogger.logError("WATCHDOG", "Transformer.start() tidak selesai dalam 90s")
+                                ExportDebugLogger.logError(
+                                    "WATCHDOG",
+                                    "Transformer.start() tidak selesai dalam 90s"
+                                )
                                 try {
                                     transformerRef?.cancel()
                                 } catch (_: Throwable) {
@@ -284,12 +295,16 @@ class VideoExporter(private val context: Context) {
                             transformerRef = null
                         }
 
-                        trySend(ExportState.Exporting(4))
+                        trySend(ExportState.Exporting(4, ExportStage.ENCODING))
                         transformer.start(composition, tempOutputFile.absolutePath)
                     } catch (t: Throwable) {
                         progressJob?.cancel()
                         startWatchdogJob?.cancel()
-                        ExportDebugLogger.logError("TRANSFORMER_INIT", "Pengecualian semasa memulakan Transformer", t)
+                        ExportDebugLogger.logError(
+                            "TRANSFORMER_INIT",
+                            "Pengecualian semasa memulakan Transformer",
+                            t
+                        )
                         if (continuation.isActive) {
                             continuation.resume(Result.failure(t))
                         }
@@ -298,7 +313,7 @@ class VideoExporter(private val context: Context) {
             }
 
             if (exportSuccess.isSuccess && tempOutputFile.exists() && tempOutputFile.length() > 0L) {
-                send(ExportState.Exporting(99))
+                send(ExportState.Exporting(99, ExportStage.SAVING))
                 val savedUri = GallerySaver.saveMp4ToGallery(
                     context = context,
                     sourceFile = tempOutputFile,
@@ -306,9 +321,20 @@ class VideoExporter(private val context: Context) {
                 )
                 if (savedUri != null) {
                     ExportDebugLogger.log("EXPORT", "Berjaya disimpan ke Galeri: $savedUri")
-                    send(ExportState.Success(savedUri.toString()))
+                    val fileSizeBytes = tempOutputFile.length()
+                    val durationMs = state.finalTimelineDurationMs
+                    send(
+                        ExportState.Success(
+                            savedUriString = savedUri.toString(),
+                            durationMs = durationMs,
+                            fileSizeBytes = fileSizeBytes
+                        )
+                    )
                 } else {
-                    ExportDebugLogger.logError("GALLERY", "GallerySaver.saveMp4ToGallery memulangkan null.")
+                    ExportDebugLogger.logError(
+                        "GALLERY",
+                        "GallerySaver.saveMp4ToGallery memulangkan null."
+                    )
                     send(ExportState.Error("Video siap diproses tetapi gagal disimpan ke Galeri."))
                 }
             } else {
@@ -502,7 +528,10 @@ class VideoExporter(private val context: Context) {
             finalBitmap.recycle()
 
             val engineTag = if (NativeCoreBridge.isNativeLoaded) "Rust" else "Kotlin"
-            ExportDebugLogger.log("COMPRESS[$engineTag]", "Gambar: ${rawW}x${rawH} -> ${outW}x${outH} (mode=${cropScaleMode.name})")
+            ExportDebugLogger.log(
+                "COMPRESS[$engineTag]",
+                "Gambar: ${rawW}x${rawH} -> ${outW}x${outH} (mode=${cropScaleMode.name})"
+            )
 
             FileProvider.getUriForFile(
                 context,
