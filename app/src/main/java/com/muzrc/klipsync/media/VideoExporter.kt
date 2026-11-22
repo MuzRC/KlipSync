@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.SystemClock
+import androidx.core.content.FileProvider
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
@@ -57,6 +58,9 @@ class VideoExporter(private val context: Context) {
                 "RustCore=${NativeCoreBridge.isNativeLoaded}"
         )
 
+        // Bersihkan fail sementara lama pada permulaan, bukan hanya akhir.
+        cleanupTempExportFiles()
+
         send(ExportState.Exporting(1))
 
         if (state.clips.isEmpty()) {
@@ -81,7 +85,6 @@ class VideoExporter(private val context: Context) {
             )
             val safeState = state.copy(clips = preparedClips)
 
-            System.gc()
             send(ExportState.Exporting(3))
 
             val sequences = mutableListOf<EditedMediaItemSequence>()
@@ -121,7 +124,7 @@ class VideoExporter(private val context: Context) {
                 .experimentalSetForceAudioTrack(shouldForceAudioTrack)
                 .build()
 
-            val targetBitrate = if (shortEdge >= 1080) 5_500_000 else 3_200_000
+            val targetBitrate = computeTargetBitrate(shortEdge, state.exportConfig.frameRate.fps)
             val encoderFactory = DefaultEncoderFactory.Builder(context)
                 .setEnableFallback(true)
                 .setRequestedVideoEncoderSettings(
@@ -140,10 +143,12 @@ class VideoExporter(private val context: Context) {
             )
 
             ExportDebugLogger.log("TRANSFORMER", "Memulakan Transformer.start()...")
-            val exportSuccess = withContext(Dispatchers.Main) {
+            val exportSuccess = withContext(Dispatchers.Default) {
                 suspendCancellableCoroutine<Result<Unit>> { continuation ->
                     var transformerRef: Transformer? = null
                     var progressJob: Job? = null
+                    var startWatchdogJob: Job? = null
+
                     try {
                         val transformer = Transformer.Builder(context)
                             .setVideoMimeType(MimeTypes.VIDEO_H264)
@@ -156,6 +161,7 @@ class VideoExporter(private val context: Context) {
                                     exportResult: ExportResult
                                 ) {
                                     progressJob?.cancel()
+                                    startWatchdogJob?.cancel()
                                     ExportDebugLogger.log(
                                         "TRANSFORMER",
                                         "onCompleted! durationMs=${exportResult.durationMs}, fileSize=${exportResult.fileSizeBytes}"
@@ -171,6 +177,7 @@ class VideoExporter(private val context: Context) {
                                     exportException: ExportException
                                 ) {
                                     progressJob?.cancel()
+                                    startWatchdogJob?.cancel()
                                     ExportDebugLogger.logError(
                                         "TRANSFORMER",
                                         "onError code=${exportException.errorCode} (${exportException.errorCodeName})",
@@ -246,19 +253,44 @@ class VideoExporter(private val context: Context) {
                             }
                         }
 
+                        // Watchdog luaran: jika start() sendiri hang (contoh native stuck),
+                        // resume continuation selepas 90s.
+                        startWatchdogJob = launch {
+                            delay(90_000L)
+                            if (isActive && continuation.isActive) {
+                                ExportDebugLogger.logError("WATCHDOG", "Transformer.start() tidak selesai dalam 90s")
+                                try {
+                                    transformerRef?.cancel()
+                                } catch (_: Throwable) {
+                                }
+                                if (continuation.isActive) {
+                                    continuation.resume(
+                                        Result.failure(
+                                            IllegalStateException(
+                                                "Pengekod video telefon tidak memberi respons. Cuba resolusi lebih rendah."
+                                            )
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
                         continuation.invokeOnCancellation {
                             ExportDebugLogger.log("EXPORT", "Eksport dibatalkan oleh pengguna.")
                             progressJob?.cancel()
+                            startWatchdogJob?.cancel()
                             try {
                                 transformerRef?.cancel()
                             } catch (_: Throwable) {
                             }
+                            transformerRef = null
                         }
 
                         trySend(ExportState.Exporting(4))
                         transformer.start(composition, tempOutputFile.absolutePath)
                     } catch (t: Throwable) {
                         progressJob?.cancel()
+                        startWatchdogJob?.cancel()
                         ExportDebugLogger.logError("TRANSFORMER_INIT", "Pengecualian semasa memulakan Transformer", t)
                         if (continuation.isActive) {
                             continuation.resume(Result.failure(t))
@@ -302,7 +334,6 @@ class VideoExporter(private val context: Context) {
                 }
             }
         } catch (oom: OutOfMemoryError) {
-            System.gc()
             ExportDebugLogger.logError("OOM", "OutOfMemoryError semasa eksport", oom)
             send(ExportState.Error("Memori telefon tidak mencukupi. Sila pilih resolusi 720p HD atau kurangkan bilangan gambar."))
         } catch (t: Throwable) {
@@ -315,6 +346,17 @@ class VideoExporter(private val context: Context) {
             }
             cleanupTempExportFiles()
         }
+    }
+
+    private fun computeTargetBitrate(shortEdge: Int, fps: Int): Int {
+        // Bitrate asas mengikut resolusi, di-skala dengan FPS.
+        val base = when {
+            shortEdge >= 1080 -> 5_500_000
+            shortEdge >= 720 -> 3_200_000
+            else -> 1_800_000
+        }
+        val fpsFactor = (fps.coerceIn(24, 60).toFloat() / 30f).coerceIn(0.8f, 1.8f)
+        return (base * fpsFactor).roundToInt()
     }
 
     private suspend fun prepareCompressedClipsForExport(
@@ -382,7 +424,6 @@ class VideoExporter(private val context: Context) {
             val curH = decoded.height
             val ratioFloat = aspectRatio.aspectRatioFloat
 
-            // Jika mod FIT_BLUR & nisbah skrin berbeza daripada gambar asal, jana latar kabur sebenar dalam Rust
             val needFitBlur = cropScaleMode == CropScaleMode.FIT_BLUR &&
                 ratioFloat != null &&
                 ratioFloat > 0f &&
@@ -465,7 +506,14 @@ class VideoExporter(private val context: Context) {
 
             val engineTag = if (NativeCoreBridge.isNativeLoaded) "Rust" else "Kotlin"
             ExportDebugLogger.log("COMPRESS[$engineTag]", "Gambar: ${rawW}x${rawH} -> ${outW}x${outH} (mode=${cropScaleMode.name})")
-            Uri.fromFile(outFile)
+
+            // Guna FileProvider untuk dapatkan content:// URI supaya Media3
+            // dan komponen lain boleh baca dengan selamat.
+            FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                outFile
+            )
         } catch (t: Throwable) {
             ExportDebugLogger.logError("COMPRESS", "Gagal memampatkan gambar $uri", t)
             null
@@ -476,7 +524,8 @@ class VideoExporter(private val context: Context) {
         try {
             context.cacheDir.listFiles()?.forEach { file ->
                 if ((file.name.startsWith("freeze_frame_") && file.name.endsWith(".png")) ||
-                    (file.name.startsWith("export_img_") && file.name.endsWith(".jpg"))
+                    (file.name.startsWith("export_img_") && file.name.endsWith(".jpg")) ||
+                    (file.name.startsWith("klipsync_export_") && file.name.endsWith(".mp4"))
                 ) {
                     file.delete()
                 }
