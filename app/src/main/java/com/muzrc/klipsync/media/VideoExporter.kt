@@ -144,7 +144,7 @@ class VideoExporter(private val context: Context) {
             )
 
             ExportDebugLogger.log("TRANSFORMER", "Memulakan Transformer.start()...")
-            val exportSuccess = withContext(Dispatchers.Default) {
+            val exportSuccess = withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine<Result<Unit>> { continuation ->
                     var transformerRef: Transformer? = null
                     var progressJob: Job? = null
