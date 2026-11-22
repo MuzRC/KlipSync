@@ -20,9 +20,15 @@ object AudioSequenceBuilder {
         val effectiveDurationMs = audioConfig.effectiveAudioDurationMs
         if (effectiveDurationMs <= 0L) return null
 
+        val startMs = audioConfig.startOffsetMs.coerceAtLeast(0L)
+        val endMs = audioConfig.totalDurationMs
+
+        // Validasi: clipping tidak boleh negatif atau sifar
+        if (endMs <= startMs) return null
+
         val clippingConfig = MediaItem.ClippingConfiguration.Builder()
-            .setStartPositionMs(audioConfig.startOffsetMs.coerceAtLeast(0L))
-            .setEndPositionMs(audioConfig.totalDurationMs)
+            .setStartPositionMs(startMs)
+            .setEndPositionMs(endMs)
             .build()
 
         val mediaItem = MediaItem.Builder()
@@ -63,38 +69,78 @@ object AudioSequenceBuilder {
 
         private var processedFrames: Long = 0L
 
+        // Simpan baki byte yang tidak lengkap (frame separuh) untuk diproses
+        // bersama buffer seterusnya. Ini mengelak output rosak.
+        private var pendingByte: Byte? = null
+
         override fun onConfigure(
             inputAudioFormat: AudioProcessor.AudioFormat
         ): AudioProcessor.AudioFormat {
             if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
-                throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
+                // Kembalikan NOT_SET supaya chain tidak crash; Transformer
+                // akan skip processor ini jika format tidak disokong.
+                return AudioProcessor.AudioFormat.NOT_SET
             }
             return inputAudioFormat
         }
 
         override fun onFlush() {
             processedFrames = 0L
+            pendingByte = null
         }
 
         override fun onReset() {
             processedFrames = 0L
+            pendingByte = null
         }
 
         override fun queueInput(inputBuffer: ByteBuffer) {
             val remaining = inputBuffer.remaining()
-            if (remaining == 0) return
+            if (remaining == 0 && pendingByte == null) return
 
-            val outBuffer = replaceOutputBuffer(remaining)
             val channelCount = inputAudioFormat.channelCount.coerceAtLeast(1)
             val sampleRate = inputAudioFormat.sampleRate.coerceAtLeast(1)
             val bytesPerFrame = channelCount * 2
 
-            while (inputBuffer.remaining() >= bytesPerFrame) {
+            // Kira saiz output: baki byte + remaining, dibundarkan ke bawah
+            // ke gandaan bytesPerFrame, ditambah baki baru (jika ada).
+            val totalAvailable = remaining + (if (pendingByte != null) 1 else 0)
+            val completeBytes = (totalAvailable / bytesPerFrame) * bytesPerFrame
+            val newPendingCount = totalAvailable - completeBytes
+
+            val outBuffer = replaceOutputBuffer(completeBytes)
+            if (completeBytes == 0) {
+                // Simpan semua sebagai pending
+                pendingByte?.let { outBuffer.put(it) } // tidak sepatutnya berlaku
+                // Simpan balik ke pending (hanya 1 byte mungkin)
+                if (remaining > 0) {
+                    pendingByte = inputBuffer.get()
+                }
+                outBuffer.flip()
+                return
+            }
+
+            // Bina buffer kerja sementara jika ada pending byte
+            val workBuffer: ByteBuffer
+            if (pendingByte != null) {
+                workBuffer = ByteBuffer.allocate(totalAvailable)
+                workBuffer.put(pendingByte!!)
+                pendingByte = null
+                val slice = ByteBuffer.allocate(remaining)
+                inputBuffer.get(slice.array())
+                workBuffer.put(slice.array())
+                workBuffer.flip()
+            } else {
+                workBuffer = inputBuffer
+            }
+
+            // Proses frame lengkap
+            while (workBuffer.remaining() >= bytesPerFrame) {
                 val currentTimeMs = (processedFrames * 1000L) / sampleRate
                 val gain = computeGainAt(currentTimeMs)
 
                 for (ch in 0 until channelCount) {
-                    val sample = inputBuffer.short
+                    val sample = workBuffer.short
                     val scaled = (sample * gain)
                         .roundToInt()
                         .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
@@ -104,9 +150,9 @@ object AudioSequenceBuilder {
                 processedFrames++
             }
 
-            // Salin baki bait jika ada
-            while (inputBuffer.hasRemaining()) {
-                outBuffer.put(inputBuffer.get())
+            // Simpan baki byte baru (jika ada) untuk buffer seterusnya
+            if (workBuffer.hasRemaining()) {
+                pendingByte = workBuffer.get()
             }
 
             outBuffer.flip()
