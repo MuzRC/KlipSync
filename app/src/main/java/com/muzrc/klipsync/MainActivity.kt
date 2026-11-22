@@ -7,12 +7,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.activity.viewModels
 import com.muzrc.klipsync.ui.EditorScreen
 import com.muzrc.klipsync.ui.theme.KlipSyncTheme
 import com.muzrc.klipsync.viewmodel.EditorViewModel
 
 class MainActivity : ComponentActivity() {
+
     private val editorViewModel: EditorViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
