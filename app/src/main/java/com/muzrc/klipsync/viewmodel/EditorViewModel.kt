@@ -239,7 +239,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
         var targetStartMs = 0L
         val overlapPerJoin = if (state.transitionConfig.joinMode == JoinMode.OVERLAP) {
-            state.transitionConfig.durationMs.coerceAtLeast(0L)
+            state.transitionConfig.clampedDurationMs
         } else {
             0L
         }
@@ -415,7 +415,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             continuousKey = "speed_$clipId",
             syncPreview = true
         ) { state ->
-            val safeSpeed = speed.coerceIn(0.25f, 3.0f)
+            val safeSpeed = speed.coerceIn(0.25f, 4.0f)
             val updatedClips = state.clips.map { clip ->
                 if (clip.id == clipId && !clip.isImage) clip.copy(speed = safeSpeed) else clip
             }
@@ -426,7 +426,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun applySpeedToAllClips(speed: Float) {
         pausePlayback()
         updateProjectState(syncPreview = true) { state ->
-            val safeSpeed = speed.coerceIn(0.25f, 3.0f)
+            val safeSpeed = speed.coerceIn(0.25f, 4.0f)
             val updatedClips = state.clips.map {
                 if (!it.isImage) it.copy(speed = safeSpeed) else it
             }
@@ -552,8 +552,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             continuousKey = "trans_dur",
             syncPreview = true
         ) { state ->
-  state.copy(
-                transitionConfig = state.transitionConfig.copy(durationMs = durationMs)
+            state.copy(
+                transitionConfig = state.transitionConfig.copy(
+                    durationMs = durationMs.coerceIn(0L, 3_000L)
+                )
             )
         }
     }
@@ -585,19 +587,19 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setBrightness(value: Float) {
         updateProjectState(continuousKey = "brightness", syncPreview = false) { state ->
-            state.copy(colorConfig = state.colorConfig.copy(brightness = value.coerceIn(-0.4f, 0.4f)))
+            state.copy(colorConfig = state.colorConfig.copy(brightness = value.coerceIn(-0.5f, 0.5f)))
         }
     }
 
     fun setContrast(value: Float) {
         updateProjectState(continuousKey = "contrast", syncPreview = false) { state ->
-            state.copy(colorConfig = state.colorConfig.copy(contrast = value.coerceIn(0.6f, 1.5f)))
+            state.copy(colorConfig = state.colorConfig.copy(contrast = value.coerceIn(0.5f, 1.5f)))
         }
     }
 
     fun setSaturation(value: Float) {
         updateProjectState(continuousKey = "saturation", syncPreview = false) { state ->
-            state.copy(colorConfig = state.colorConfig.copy(saturation = value.coerceIn(0f, 1.8f)))
+            state.copy(colorConfig = state.colorConfig.copy(saturation = value.coerceIn(0f, 2f)))
         }
     }
 
@@ -781,7 +783,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                         loopCount = 1
                     )
                 } else {
-                    val safeSpeed = templateClip.speed.coerceIn(0.25f, 4.0f)
+                    val safeSpeed = templateClip.clampedSpeed
                     val neededRawMs = (slotDurMs * safeSpeed).toLong()
                     val availableRawMs = (templateClip.originalDurationMs - templateClip.trimStartMs)
                         .coerceAtLeast(250L)
@@ -920,7 +922,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         updateProjectState(continuousKey = "wm_scale", syncPreview = false) { state ->
             state.copy(
                 watermarkConfig = state.watermarkConfig.copy(
-                    scalePercent = scale.coerceIn(0.08f, 0.55f)
+                    scalePercent = scale.coerceIn(0.10f, 0.50f)
                 )
             )
         }
