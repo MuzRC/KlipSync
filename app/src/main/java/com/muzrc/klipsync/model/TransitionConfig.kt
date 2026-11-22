@@ -15,7 +15,8 @@ enum class TransitionType(val label: String) {
 
 enum class VideoEndBehavior(val label: String) {
     FREEZE_FRAME("Freeze Frame"),
-    LOOP_TO_AUDIO("Auto-Loop Video")
+    LOOP_TO_AUDIO("Auto-Loop Video"),
+    STOP("Berhenti (Ikut Video)")
 }
 
 data class TransitionConfig(
@@ -23,4 +24,7 @@ data class TransitionConfig(
     val transitionType: TransitionType = TransitionType.NONE,
     val durationMs: Long = 800L,
     val endBehavior: VideoEndBehavior = VideoEndBehavior.FREEZE_FRAME
-)
+) {
+    val clampedDurationMs: Long
+        get() = durationMs.coerceIn(0L, 3_000L)
+}
