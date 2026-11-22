@@ -43,7 +43,7 @@ fun SpeedTabPanel(
         return
     }
 
-    val speedPresets = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+    val speedPresets = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f, 4.0f)
 
     Column(
         modifier = Modifier
@@ -68,7 +68,7 @@ fun SpeedTabPanel(
                 )
 
                 Text(
-                    text = "Kelajuan Semasa: ${String.format(Locale.US, "%.2fx", selectedClip.speed)} • Durasi Baharu: ${TimeFormatter.formatPreciseMs(selectedClip.singlePlayDurationMs)}",
+                    text = "Kelajuan Semasa: ${String.format(Locale.US, "%.2fx", selectedClip.clampedSpeed)} • Durasi Baharu: ${TimeFormatter.formatPreciseMs(selectedClip.singlePlayDurationMs)}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -76,7 +76,7 @@ fun SpeedTabPanel(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     speedPresets.forEach { preset ->
                         FilterChip(
-                            selected = abs(selectedClip.speed - preset) < 0.03f,
+                            selected = abs(selectedClip.clampedSpeed - preset) < 0.03f,
                             onClick = { onSpeedChange(selectedClip.id, preset) },
                             label = {
                                 Text(
@@ -84,6 +84,7 @@ fun SpeedTabPanel(
                                         0.5f -> "0.5x (Slow-Mo)"
                                         1.0f -> "1.0x (Normal)"
                                         2.0f -> "2.0x (Laju)"
+                                        4.0f -> "4.0x (Max)"
                                         else -> "${preset}x"
                                     }
                                 )
@@ -93,14 +94,14 @@ fun SpeedTabPanel(
                 }
 
                 Slider(
-                    value = selectedClip.speed,
+                    value = selectedClip.clampedSpeed.coerceIn(0.25f, 4.0f),
                     onValueChange = { onSpeedChange(selectedClip.id, it) },
-                    valueRange = 0.25f..3.0f
+                    valueRange = 0.25f..4.0f
                 )
 
                 if (hasMultipleClips) {
                     OutlinedButton(
-                        onClick = { onApplyToAll(selectedClip.speed) },
+                        onClick = { onApplyToAll(selectedClip.clampedSpeed) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Guna Kelajuan Ini Pada Semua Klip")
