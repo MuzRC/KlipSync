@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableList
 import com.muzrc.klipsync.model.SubtitleFontFamily
 import com.muzrc.klipsync.model.SubtitleItem
 import com.muzrc.klipsync.model.SubtitlePosition
+import kotlin.math.min
 
 @UnstableApi
 object SubtitleOverlayBuilder {
@@ -35,13 +36,16 @@ object SubtitleOverlayBuilder {
         private var videoWidth = 1080
         private var videoHeight = 1920
         private var cachedBitmap: Bitmap? = null
-        private var lastActiveIds: String = ""
+        private var lastSignature: String = ""
 
         override fun configure(videoSize: Size) {
             super.configure(videoSize)
             videoWidth = videoSize.width.coerceAtLeast(1)
             videoHeight = videoSize.height.coerceAtLeast(1)
-            lastActiveIds = "__INVALIDATE__"
+            // Invalidasi cache; jangan recycle bitmap lama kerana ia mungkin
+            // masih digunakan oleh GPU. Biarkan GC handle.
+            cachedBitmap = null
+            lastSignature = ""
         }
 
         override fun getBitmap(presentationTimeUs: Long): Bitmap {
@@ -50,13 +54,15 @@ object SubtitleOverlayBuilder {
                 currentTimeMs in it.startMs..it.endMs && it.text.isNotBlank()
             }
 
-            val signature = activeItems.joinToString("|") { "${it.id}:${it.text}" }
+            // Signature mesti merangkumi semua properti visual supaya
+            // perubahan warna/saiz/font/posisi mencetuskan bitmap baru.
+            val signature = buildSignature(activeItems)
             val existing = cachedBitmap
-            if (existing != null && !existing.isRecycled && signature == lastActiveIds) {
+            if (existing != null && !existing.isRecycled && signature == lastSignature) {
                 return existing
             }
 
-            lastActiveIds = signature
+            lastSignature = signature
             val bitmap = Bitmap.createBitmap(videoWidth, videoHeight, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
 
@@ -64,67 +70,118 @@ object SubtitleOverlayBuilder {
                 drawSubtitles(canvas, activeItems)
             }
 
-            cachedBitmap?.recycle()
+            // Jangan recycle bitmap lama di sini — ia mungkin masih dalam
+            // penggunaan GPU. Biarkan GC handle.
             cachedBitmap = bitmap
             return bitmap
         }
 
+        private fun buildSignature(items: List<SubtitleItem>): String {
+            if (items.isEmpty()) return ""
+            return items.joinToString("|") {
+                "${it.id}:${it.text}:${it.textColorHex}:${it.fontSizeSp}:" +
+                    "${it.fontFamily}:${it.position}:${it.hasDarkBackground}:" +
+                    "${it.startMs}:${it.endMs}"
+            }
+        }
+
         private fun drawSubtitles(canvas: Canvas, items: List<SubtitleItem>) {
-            val scaleFactor = videoWidth / 360f
+            // Guna sisi pendek supaya teks konsisten untuk portrait & landscape.
+            val scaleFactor = min(videoWidth, videoHeight) / 360f
             val horizontalMargin = videoWidth * 0.08f
             val maxTextWidth = (videoWidth - horizontalMargin * 2).toInt().coerceAtLeast(100)
 
             items.forEach { item ->
-                val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = item.textColorHex.toInt()
-                    textSize = item.fontSizeSp * scaleFactor
-                    typeface = resolveTypeface(item.fontFamily)
-                    if (!item.hasDarkBackground) {
-                        setShadowLayer(4f * scaleFactor, 0f, 2f * scaleFactor, Color.BLACK)
-                    }
+                try {
+                    drawSingleSubtitle(canvas, item, scaleFactor, horizontalMargin, maxTextWidth)
+                } catch (_: Exception) {
+                    // Skip item yang gagal supaya render tidak crash.
                 }
+            }
+        }
 
-                val staticLayout = StaticLayout.Builder
-                    .obtain(item.text, 0, item.text.length, textPaint, maxTextWidth)
-                    .setAlignment(Layout.Alignment.ALIGN_CENTER)
-                    .setLineSpacing(4f * scaleFactor, 1.0f)
-                    .setIncludePad(true)
-                    .build()
-
-                val textHeight = staticLayout.height.toFloat()
-                var maxLineWidth = 0f
-                for (i in 0 until staticLayout.lineCount) {
-                    maxLineWidth = maxOf(maxLineWidth, staticLayout.getLineWidth(i))
+        private fun drawSingleSubtitle(
+            canvas: Canvas,
+            item: SubtitleItem,
+            scaleFactor: Float,
+            horizontalMargin: Float,
+            maxTextWidth: Int
+        ) {
+            val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = parseColor(item.textColorHex)
+                textSize = item.fontSizeSp * scaleFactor
+                typeface = resolveTypeface(item.fontFamily)
+                if (!item.hasDarkBackground) {
+                    setShadowLayer(4f * scaleFactor, 0f, 2f * scaleFactor, Color.BLACK)
                 }
+            }
 
-                val padH = 14f * scaleFactor
-                val padV = 8f * scaleFactor
+            val staticLayout = StaticLayout.Builder
+                .obtain(item.text, 0, item.text.length, textPaint, maxTextWidth)
+                .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                .setLineSpacing(4f * scaleFactor, 1.0f)
+                .setIncludePad(true)
+                .build()
 
-                val topY = when (item.position) {
-                    SubtitlePosition.TOP -> videoHeight * 0.10f
-                    SubtitlePosition.CENTER -> (videoHeight - textHeight) / 2f
-                    SubtitlePosition.BOTTOM -> videoHeight * 0.82f - textHeight
+            val textHeight = staticLayout.height.toFloat()
+            var maxLineWidth = 0f
+            for (i in 0 until staticLayout.lineCount) {
+                maxLineWidth = maxOf(maxLineWidth, staticLayout.getLineWidth(i))
+            }
+
+            val padH = 14f * scaleFactor
+            val padV = 8f * scaleFactor
+
+            val topY = when (item.position) {
+                SubtitlePosition.TOP -> videoHeight * 0.10f
+                SubtitlePosition.CENTER -> (videoHeight - textHeight) / 2f
+                SubtitlePosition.BOTTOM -> videoHeight * 0.82f - textHeight
+            }.coerceAtLeast(0f)
+
+            if (item.hasDarkBackground) {
+                val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.argb(175, 0, 0, 0)
+                    style = Paint.Style.FILL
                 }
+                val rect = RectF(
+                    (videoWidth - maxLineWidth) / 2f - padH,
+                    topY - padV,
+                    (videoWidth + maxLineWidth) / 2f + padH,
+                    topY + textHeight + padV
+                )
+                val radius = 10f * scaleFactor
+                canvas.drawRoundRect(rect, radius, radius, bgPaint)
+            }
 
-                if (item.hasDarkBackground) {
-                    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = Color.argb(175, 0, 0, 0)
-                        style = Paint.Style.FILL
-                    }
-                    val rect = RectF(
-                        (videoWidth - maxLineWidth) / 2f - padH,
-                        topY - padV,
-                        (videoWidth + maxLineWidth) / 2f + padH,
-                        topY + textHeight + padV
-                    )
-                    val radius = 10f * scaleFactor
-                    canvas.drawRoundRect(rect, radius, radius, bgPaint)
+            canvas.save()
+            canvas.translate(horizontalMargin, topY)
+            staticLayout.draw(canvas)
+            canvas.restore()
+        }
+
+        /**
+         * Parse warna dari pelbagai format:
+         * - "#RRGGBB" atau "#AARRGGBB" (dengan #)
+         * - "RRGGBB" atau "AARRGGBB" (tanpa #)
+         * - Integer ARGB
+         * Jika tiada alpha, tambah alpha penuh (0xFF).
+         */
+        private fun parseColor(colorHex: String): Int {
+            val trimmed = colorHex.trim()
+            if (trimmed.isEmpty()) return Color.WHITE
+
+            // Cuba parse sebagai integer (jika sudah ARGB)
+            trimmed.toIntOrNull()?.let { return it }
+
+            val hex = trimmed.removePrefix("#")
+            return try {
+                when (hex.length) {
+                    6 -> (0xFF000000.toInt()) or hex.toLong(16).toInt() // RRGGBB → tambah alpha
+                    8 -> hex.toLong(16).toInt()                        // AARRGGBB
+                    else -> Color.WHITE
                 }
-
-                canvas.save()
-                canvas.translate(horizontalMargin, topY)
-                staticLayout.draw(canvas)
-                canvas.restore()
+            } catch (_: NumberFormatException) {
+                Color.WHITE
             }
         }
 
