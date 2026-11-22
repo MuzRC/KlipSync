@@ -30,9 +30,9 @@ import com.muzrc.klipsync.model.TransitionType
 import com.muzrc.klipsync.model.VideoClip
 import com.muzrc.klipsync.model.VideoEndBehavior
 import com.muzrc.klipsync.model.WatermarkConfig
+import com.muzrc.klipsync.util.ExportDebugLogger
 import java.io.File
 import java.io.FileOutputStream
-import kotlin.math.max
 
 @UnstableApi
 class VideoSequenceBuilder(private val context: Context) {
@@ -52,9 +52,8 @@ class VideoSequenceBuilder(private val context: Context) {
     ): EditedMediaItemSequence? {
         if (clips.isEmpty()) return null
 
-        // Hadkan loopCount untuk elak senarai terlalu besar.
         val baseExpandedClips = clips.flatMap { clip ->
-            List(clip.loopCount.coerceIn(1, 20)) { clip }
+            List(clip.clampedLoopCount.coerceIn(1, 20)) { clip }
         }
 
         val finalClipChain = mutableListOf<VideoClip>()
@@ -110,7 +109,7 @@ class VideoSequenceBuilder(private val context: Context) {
             audioConfig.originalVideoVolume <= 0.01f
 
         val overlapHalfMs = if (transitionConfig.joinMode == JoinMode.OVERLAP && finalClipChain.size > 1) {
-            (transitionConfig.durationMs / 2L).coerceAtLeast(0L)
+            (transitionConfig.clampedDurationMs / 2L).coerceAtLeast(0L)
         } else {
             0L
         }
@@ -120,10 +119,9 @@ class VideoSequenceBuilder(private val context: Context) {
         finalClipChain.forEachIndexed { index, clip ->
             val isFirst = index == 0
             val isLast = index == finalClipChain.lastIndex
-            val safeSpeed = if (clip.isImage) 1.0f else clip.speed.coerceIn(0.25f, 4.0f)
+            val safeSpeed = if (clip.isImage) 1.0f else clip.clampedSpeed
 
             val clipRawDurationMs = (clip.trimEndMs - clip.trimStartMs).coerceAtLeast(100L)
-            // Pastikan overlap tidak melebihi separuh durasi klip.
             val safeOverlapHalfMs = overlapHalfMs.coerceAtMost(clipRawDurationMs / 2)
 
             val adjustedStart = if (!isFirst) {
@@ -148,10 +146,7 @@ class VideoSequenceBuilder(private val context: Context) {
             val finalPlayedDurationMs = ((adjustedEnd - adjustedStart) / safeSpeed).toLong().coerceAtLeast(100L)
             val clipDurationUs = finalPlayedDurationMs * 1000L
 
-            // Nota: Media3 menyerahkan presentationTimeUs secara relatif kepada
-            // klip (mula dari 0), bukan relatif kepada sequence. Jadi kita
-            // gunakan 0 sebagai clipStartUs dan clipDurationUs sebagai durasi.
-            // Jika Media3 mengubah tingkah laku ini pada masa depan, semak semula.
+            // Media3 menyerahkan presentationTimeUs relatif kepada klip (mula dari 0).
             val clipStartUs = 0L
             val clipEndUs = clipDurationUs
 
@@ -159,17 +154,16 @@ class VideoSequenceBuilder(private val context: Context) {
 
             val clipVideoEffects = mutableListOf<Effect>()
 
-            // 1. Orientasi (rotate/mirror)
-            if (clip.rotationDegrees != 0 || clip.isMirrored) {
-                val normalizedRotation = ((clip.rotationDegrees % 360) + 360) % 360
+            // 1. Orientasi
+            if (clip.normalizedRotationDegrees != 0 || clip.isMirrored) {
                 val scaleRotate = ScaleAndRotateTransformation.Builder()
-                    .setRotationDegrees(normalizedRotation.toFloat())
+                    .setRotationDegrees(clip.normalizedRotationDegrees.toFloat())
                     .setScale(if (clip.isMirrored) -1f else 1f, 1f)
                     .build()
                 clipVideoEffects.add(scaleRotate)
             }
 
-            // 2. Speed change (mesti sebelum effect yang bergantung pada masa)
+            // 2. Speed change
             if (!clip.isImage && safeSpeed !in 0.99f..1.01f) {
                 clipVideoEffects.add(
                     androidx.media3.effect.SpeedChangeEffect(safeSpeed)
@@ -181,17 +175,16 @@ class VideoSequenceBuilder(private val context: Context) {
                 clipVideoEffects.add(
                     createCameraMotionEffect(
                         effect = clip.motionEffect,
-                        intensity = clip.motionIntensity,
+                        intensity = clip.clampedMotionIntensity,
                         clipStartUs = clipStartUs,
                         clipDurationUs = clipDurationUs
                     )
                 )
             }
 
-            // 4. Transition effects (fade, slide, zoom) — SEBELUM globalPostEffects
-            // supaya subtitle/watermark tidak terjejas oleh fade.
+            // 4. Transition effects (sebelum globalPostEffects)
             if (finalClipChain.size > 1 && transitionConfig.transitionType != TransitionType.NONE) {
-                val transDurationUs = (transitionConfig.durationMs.coerceAtMost(finalPlayedDurationMs / 2L)) * 1000L
+                val transDurationUs = (transitionConfig.clampedDurationMs.coerceAtMost(finalPlayedDurationMs / 2L)) * 1000L
                 val fadeInUs = if (!isFirst && transDurationUs > 0L) transDurationUs else 0L
                 val fadeOutUs = if (!isLast && transDurationUs > 0L) transDurationUs else 0L
 
@@ -256,7 +249,7 @@ class VideoSequenceBuilder(private val context: Context) {
                 }
             }
 
-            // 5. Global post effects (crop, color, subtitle, watermark) — TERAKHIR
+            // 5. Global post effects (terakhir supaya subtitle/watermark tidak terjejas)
             clipVideoEffects.addAll(globalPostEffects)
 
             val editedClip = if (clip.isImage) {
@@ -293,7 +286,7 @@ class VideoSequenceBuilder(private val context: Context) {
                     }
                     audioProcessors.add(
                         AudioSequenceBuilder.createConstantVolumeProcessor(
-                            audioConfig.originalVideoVolume
+                            audioConfig.clampedOriginalVolume
                         )
                     )
                 }
@@ -332,11 +325,10 @@ class VideoSequenceBuilder(private val context: Context) {
                     .build()
 
                 val freezeEffects = mutableListOf<Effect>()
-                if (lastClip.rotationDegrees != 0 || lastClip.isMirrored) {
-                    val normalizedRotation = ((lastClip.rotationDegrees % 360) + 360) % 360
+                if (lastClip.normalizedRotationDegrees != 0 || lastClip.isMirrored) {
                     freezeEffects.add(
                         ScaleAndRotateTransformation.Builder()
-                            .setRotationDegrees(normalizedRotation.toFloat())
+                            .setRotationDegrees(lastClip.normalizedRotationDegrees.toFloat())
                             .setScale(if (lastClip.isMirrored) -1f else 1f, 1f)
                             .build()
                     )
@@ -498,7 +490,6 @@ class VideoSequenceBuilder(private val context: Context) {
             val localTimeUs = (presentationTimeUs - clipStartUs).coerceAtLeast(0L)
             if (localTimeUs in 0L until durationUs && durationUs > 0L) {
                 val progress = (localTimeUs.toFloat() / durationUs.toFloat()).coerceIn(0f, 1f)
-                // Slide dari kanan: 1.0 (satu lebar skrin dalam NDC) → 0.0
                 val translateX = (1f - progress) * 1f
                 matrix.postTranslate(translateX, 0f)
             }
@@ -518,4 +509,31 @@ class VideoSequenceBuilder(private val context: Context) {
 
             val evenW = (bitmap.width / 2) * 2
             val evenH = (bitmap.height / 2) * 2
-            val cleanBitmap = if (evenW > 0 && evenH > 0 && (evenW != bitmap.width || evenH != bitmap
+            val cleanBitmap = if (evenW > 0 && evenH > 0 && (evenW != bitmap.width || evenH != bitmap.height)) {
+                Bitmap.createBitmap(bitmap, 0, 0, evenW, evenH).also {
+                    if (it != bitmap) bitmap.recycle()
+                }
+            } else {
+                bitmap
+            }
+            val tempFile = File(context.cacheDir, "freeze_frame_${System.nanoTime()}.png")
+            FileOutputStream(tempFile).use { out ->
+                cleanBitmap.compress(Bitmap.CompressFormat.PNG, 95, out)
+            }
+            cleanBitmap.recycle()
+
+            FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                tempFile
+            )
+        } catch (_: Exception) {
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+}
