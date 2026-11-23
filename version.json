@@ -1,6 +1,6 @@
 {
-  "latestVersion": "1.4.7",
-  "versionCode": 147,
-  "releaseNotes": "- Update build-apk.yml\n- chore: kemaskini version.json ke v1.4.5 (build 145) [skip ci]",
-  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.4.7/KlipSync-v1.4.7-signed.apk"
+  "latestVersion": "1.5.0",
+  "versionCode": 150,
+  "releaseNotes": "- Update EditorViewModel.kt\n- Update DraftStorageManager.kt\n- chore: kemaskini version.json ke v1.4.7 (build 147) [skip ci]",
+  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.5.0/KlipSync-v1.5.0-signed.apk"
 }
