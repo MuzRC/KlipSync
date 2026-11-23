@@ -66,6 +66,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private var playbackTickerJob: Job? = null
     private var exportJob: Job? = null
+    private var autosaveJob: Job? = null // <-- Tambah untuk Autosave
 
     init {
         ExportDebugLogger.init(appContext)
@@ -114,10 +115,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    /**
-     * Mengemas kini keadaan penyuntingan sambil merekodkan langkah ke dalam sejarah Undo/Redo
-     * dan menyelaraskan Live Preview secara automatik.
-     */
     private fun updateProjectState(
         continuousKey: String? = null,
         syncPreview: Boolean = true,
@@ -162,7 +159,24 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             if (seekAfterSyncMs != null || clampedPos != current.currentPositionMs) {
                 playerController.seekTo(clampedPos)
             }
+
+            // --- TAMBAH: Panggil Autosave ---
+            scheduleAutosave(finalState)
+
             finalState
+        }
+    }
+
+    // Fungsi Autosave baru
+    private fun scheduleAutosave(state: EditorUiState) {
+        if (state.clips.isEmpty()) return
+
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            // Tunggu 3 saat sebelum menyimpan (debounce)
+            delay(3000L)
+            val snapshot = state.copy(projectName = "Autosave")
+            DraftStorageManager.saveDraft(appContext, snapshot, "Autosave")
         }
     }
 
@@ -170,6 +184,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun createNewProject() {
         pausePlayback()
         exportJob?.cancel()
+        autosaveJob?.cancel() // Batalkan autosave sedia ada
+        
         undoStack.clear()
         redoStack.clear()
         lastContinuousActionKey = ""
@@ -179,6 +195,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = freshState
         syncPreviewWithState(freshState)
         playerController.seekTo(0L)
+        
+        // Padam fail autosave lama (pilihan, untuk bersihkan storan)
+        viewModelScope.launch {
+            DraftStorageManager.deleteDraft(appContext, "autosave_draft.json")
+        }
     }
 
     fun undo() {
@@ -201,6 +222,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = restored
         syncPreviewWithState(restored)
         playerController.seekTo(safePos)
+        scheduleAutosave(restored) // Simpan selepas undo
     }
 
     fun redo() {
@@ -223,6 +245,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = restored
         syncPreviewWithState(restored)
         playerController.seekTo(safePos)
+        scheduleAutosave(restored) // Simpan selepas redo
     }
 
     fun selectTab(tab: EditorTab) {
@@ -1030,7 +1053,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun startExport() {
         pausePlayback()
-        // Bebaskan decoder perkakasan ExoPlayer sementara supaya Transformer mendapat akses penuh
         playerController.videoPlayer.stop()
         playerController.audioPlayer.stop()
 
@@ -1076,6 +1098,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         playbackTickerJob?.cancel()
         exportJob?.cancel()
+        autosaveJob?.cancel() // <-- Batalkan autosave
         playerController.release()
         super.onCleared()
     }
