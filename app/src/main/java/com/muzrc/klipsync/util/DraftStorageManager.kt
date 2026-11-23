@@ -24,6 +24,7 @@ import com.muzrc.klipsync.model.WatermarkPosition
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -60,10 +61,6 @@ object DraftStorageManager {
         }
     }
 
-    /**
-     * Menyalin fail media (video, gambar, audio, logo) ke storan dalaman aplikasi
-     * supaya draf kekal boleh dimainkan walaupun aplikasi ditutup dan dibuka semula.
-     */
     private fun persistUriToLocalMedia(
         context: Context,
         uri: Uri,
@@ -120,7 +117,13 @@ object DraftStorageManager {
     ): SavedDraftSummary = withContext(Dispatchers.IO) {
         val safeTitle = customName.trim().ifEmpty { "Draf_${System.currentTimeMillis()}" }
         val now = System.currentTimeMillis()
-        val fileName = "draft_${now}.json"
+        
+        // LOGIK AUTOSAVE: Jika nama "Autosave", guna fail yang sama.
+        val fileName = if (safeTitle == "Autosave") {
+            "autosave_draft.json" 
+        } else {
+            "draft_${now}.json" 
+        }
 
         val root = JSONObject().apply {
             put("projectName", safeTitle)
@@ -293,7 +296,7 @@ object DraftStorageManager {
 
                     clips.add(
                         VideoClip(
-                            id = c.optString("id").ifBlank { java.util.UUID.randomUUID().toString() },
+                            id = c.optString("id").ifBlank { UUID.randomUUID().toString() },
                             uri = Uri.parse(uriStr),
                             displayName = c.optString("displayName", "Clip_${i + 1}"),
                             originalDurationMs = rawOriginalDur,
@@ -364,7 +367,7 @@ object DraftStorageManager {
 
                 subtitles.add(
                     SubtitleItem(
-                        id = s.optString("id").ifBlank { java.util.UUID.randomUUID().toString() },
+                        id = s.optString("id").ifBlank { UUID.randomUUID().toString() },
                         text = s.optString("text"),
                         startMs = rawStart,
                         endMs = rawEnd,
