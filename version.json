@@ -1,6 +1,6 @@
 {
-  "latestVersion": "1.4.0",
-  "versionCode": 140,
-  "releaseNotes": "- Change coroutine context to Main for export success\n- chore: kemaskini version.json ke v1.3.8 (build 138) [skip ci]",
-  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.4.0/KlipSync-v1.4.0-signed.apk"
+  "latestVersion": "1.4.3",
+  "versionCode": 143,
+  "releaseNotes": "- Implement multiple video effects in VideoSequenceBuilder\n- Remove unused camera motion effects and update comments\n- chore: kemaskini version.json ke v1.4.0 (build 140) [skip ci]",
+  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.4.3/KlipSync-v1.4.3-signed.apk"
 }
