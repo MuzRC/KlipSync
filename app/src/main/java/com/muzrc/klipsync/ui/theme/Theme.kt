@@ -7,15 +7,32 @@ import androidx.compose.ui.graphics.Color
 
 private val DarkColors = darkColorScheme(
     primary = PrimaryCyan,
-    onPrimary = Color(0xFF002028),
-    secondary = SecondaryViolet,
-    tertiary = AccentAmber,
+    onPrimary = Color(0xFF001F28),
+    primaryContainer = CyanContainerDark,
+    onPrimaryContainer = CyanOnContainer,
+    secondary = PrimaryCyan,
+    onSecondary = Color(0xFF001F28),
+    secondaryContainer = CyanContainerDark,
+    onSecondaryContainer = CyanOnContainer,
+    tertiary = PrimaryCyan,
+    onTertiary = Color(0xFF001F28),
+    tertiaryContainer = CyanContainerDark,
+    onTertiaryContainer = CyanOnContainer,
     background = DarkBackground,
-    surface = DarkSurface,
-    surfaceVariant = DarkSurfaceVariant,
     onBackground = TextPrimary,
+    surface = DarkSurface,
     onSurface = TextPrimary,
-    onSurfaceVariant = TextSecondary
+    surfaceVariant = DarkSurfaceVariant,
+    onSurfaceVariant = TextSecondary,
+    surfaceContainerLowest = ObsidianVoid,
+    surfaceContainerLow = DarkBackground,
+    surfaceContainer = DarkSurface,
+    surfaceContainerHigh = DarkSurfaceVariant,
+    surfaceContainerHighest = SurfaceElevatedHigh,
+    outline = StrongBorder,
+    outlineVariant = SubtleBorder,
+    error = ErrorRed,
+    onError = Color(0xFF2B0004)
 )
 
 @Composable

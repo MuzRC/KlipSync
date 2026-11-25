@@ -1,6 +1,8 @@
 package com.muzrc.klipsync.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -42,50 +45,62 @@ fun EditorTabBar(
     onSelectTab: (EditorTab) -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp
+        color = MaterialTheme.colorScheme.surface
     ) {
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 6.dp),
-            contentPadding = PaddingValues(horizontal = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(EditorTab.entries) { tab ->
-                val selected = tab == activeTab
-                val bgColor = if (selected) {
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-                } else {
-                    Color.Transparent
-                }
-                val contentColor = if (selected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                }
+        Column(modifier = Modifier.fillMaxWidth()) {
+            HorizontalDivider(
+                thickness = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
 
-                Column(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(bgColor)
-                        .clickable { onSelectTab(tab) }
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Icon(
-                        imageVector = iconForTab(tab),
-                        contentDescription = tab.title,
-                        tint = contentColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                        text = tab.title,
-                        fontSize = 11.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = contentColor
-                    )
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(EditorTab.entries) { tab ->
+                    val selected = tab == activeTab
+                    val bgColor = if (selected) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                    } else {
+                        Color.Transparent
+                    }
+                    val borderColor = if (selected) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.50f)
+                    } else {
+                        Color.Transparent
+                    }
+                    val contentColor = if (selected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(bgColor)
+                            .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(10.dp))
+                            .clickable { onSelectTab(tab) }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = iconForTab(tab),
+                            contentDescription = tab.title,
+                            tint = contentColor,
+                            modifier = Modifier.size(19.dp)
+                        )
+                        Text(
+                            text = tab.title,
+                            fontSize = 11.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = contentColor
+                        )
+                    }
                 }
             }
         }

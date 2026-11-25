@@ -4,16 +4,23 @@ import android.graphics.BitmapFactory
 import android.graphics.ColorMatrixColorFilter
 import android.view.ViewGroup
 import androidx.annotation.OptIn
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,6 +60,7 @@ import com.muzrc.klipsync.model.WatermarkConfig
 import com.muzrc.klipsync.model.WatermarkPosition
 import com.muzrc.klipsync.preview.PreviewClipMotionVisual
 import com.muzrc.klipsync.preview.PreviewTransitionVisual
+import com.muzrc.klipsync.ui.theme.ObsidianVoid
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -112,26 +120,15 @@ fun LivePreviewCanvas(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color.Black)
-            .padding(vertical = 6.dp),
+            .background(ObsidianVoid)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
-        if (!hasClips) {
-            Text(
-                text = "Tambah klip video atau gambar di bawah untuk mula menyunting",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(24.dp)
-            )
-            return@Box
-        }
-
         val ratio = aspectRatio.aspectRatioFloat
         val frameModifier = if (ratio != null) {
             if (ratio >= 1f) {
                 Modifier
-                    .fillMaxWidth(0.94f)
+                    .fillMaxWidth(0.92f)
                     .aspectRatio(ratio)
             } else {
                 Modifier
@@ -140,6 +137,56 @@ fun LivePreviewCanvas(
             }
         } else {
             Modifier.fillMaxSize()
+        }
+
+        // Bingkai Kanvas Dinamik sentiasa aktif supaya pengguna terus nampak perubahan nisbah skrin
+        if (!hasClips) {
+            Box(
+                modifier = frameModifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                        RoundedCornerShape(10.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = aspectRatio.label,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.VideoLibrary,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Text(
+                        text = "Tambah video atau gambar di bawah",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+            return@Box
         }
 
         val freezeZoomScale = if (isInFreezeFrameZone && freezeFrameExtensionMs > 0L) {
@@ -156,7 +203,7 @@ fun LivePreviewCanvas(
         val combinedOffsetXFraction = transitionVisual.slideOffsetXFraction + motionVisual.panOffsetXFraction
 
         val containerBg = if (cropScaleMode == CropScaleMode.FIT_BLUR) {
-            Color(0xFF1A1E29)
+            Color(0xFF141923)
         } else {
             Color.Black
         }
@@ -171,9 +218,12 @@ fun LivePreviewCanvas(
 
         Box(
             modifier = frameModifier
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(10.dp))
                 .background(containerBg)
-                .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
+                .border(
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.30f)),
+                    RoundedCornerShape(10.dp)
+                )
         ) {
             if (activeClip?.isImage == true && activeImageBitmap != null) {
                 val imgScale = if (
@@ -270,13 +320,13 @@ fun LivePreviewCanvas(
             if (isInFreezeFrameZone) {
                 Text(
                     text = "SLOW ZOOM",
-                    color = Color.Black,
+                    color = MaterialTheme.colorScheme.onPrimary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(8.dp)
-                        .background(MaterialTheme.colorScheme.tertiary, RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }

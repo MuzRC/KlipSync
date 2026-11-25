@@ -4,20 +4,27 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.muzrc.klipsync.model.ExportConfig
 import com.muzrc.klipsync.model.ExportFrameRate
 import com.muzrc.klipsync.model.ExportResolution
@@ -26,6 +33,7 @@ import com.muzrc.klipsync.model.ExportState
 import com.muzrc.klipsync.util.TimeFormatter
 import java.util.Locale
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ExportDialog(
     exportConfig: ExportConfig,
@@ -37,6 +45,12 @@ fun ExportDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val chipColors = FilterChipDefaults.filterChipColors(
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
+        selectedLabelColor = MaterialTheme.colorScheme.primary
+    )
 
     AlertDialog(
         onDismissRequest = {
@@ -44,7 +58,13 @@ fun ExportDialog(
                 onDismiss()
             }
         },
-        title = { Text("Eksport Video MP4") },
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Text(
+                text = "Eksport Video MP4",
+                style = MaterialTheme.typography.titleMedium
+            )
+        },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -61,14 +81,27 @@ fun ExportDialog(
                         Text(
                             text = "Kualiti Resolusi",
                             style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             ExportResolution.entries.forEach { res ->
+                                val isSelected = exportConfig.resolution == res
                                 FilterChip(
-                                    selected = exportConfig.resolution == res,
+                                    selected = isSelected,
                                     onClick = { onResolutionChange(res) },
-                                    label = { Text(res.label) }
+                                    colors = chipColors,
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = isSelected,
+                                        borderColor = MaterialTheme.colorScheme.outlineVariant,
+                                        selectedBorderColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    label = { Text(res.label, fontSize = 11.5.sp) },
+                                    modifier = Modifier.height(34.dp)
                                 )
                             }
                         }
@@ -76,14 +109,27 @@ fun ExportDialog(
                         Text(
                             text = "Kadar Bingkai (Frame Rate)",
                             style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             ExportFrameRate.entries.forEach { fps ->
+                                val isSelected = exportConfig.frameRate == fps
                                 FilterChip(
-                                    selected = exportConfig.frameRate == fps,
+                                    selected = isSelected,
                                     onClick = { onFrameRateChange(fps) },
-                                    label = { Text(fps.label) }
+                                    colors = chipColors,
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = isSelected,
+                                        borderColor = MaterialTheme.colorScheme.outlineVariant,
+                                        selectedBorderColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    label = { Text(fps.label, fontSize = 11.5.sp) },
+                                    modifier = Modifier.height(34.dp)
                                 )
                             }
                         }
@@ -98,11 +144,18 @@ fun ExportDialog(
                         }
                         Text(
                             text = "$stageLabel ${exportState.progressPercent}%",
-                            style = MaterialTheme.typography.bodyMedium
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
                         )
                         LinearProgressIndicator(
                             progress = { exportState.progressPercent / 100f },
-                            modifier = Modifier.fillMaxWidth()
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
                         )
                     }
 
@@ -140,9 +193,14 @@ fun ExportDialog(
                                     Intent.createChooser(shareIntent, "Kongsi Video KlipSync")
                                 )
                             },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Kongsi Video")
+                            Text("Kongsi Video", fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -158,8 +216,14 @@ fun ExportDialog(
         },
         confirmButton = {
             if (exportState is ExportState.Idle) {
-                Button(onClick = onStartExport) {
-                    Text("Mula Eksport")
+                Button(
+                    onClick = onStartExport,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                ) {
+                    Text("Mula Eksport", fontWeight = FontWeight.Bold)
                 }
             } else if (exportState is ExportState.Success || exportState is ExportState.Error) {
                 TextButton(onClick = onDismiss) {
