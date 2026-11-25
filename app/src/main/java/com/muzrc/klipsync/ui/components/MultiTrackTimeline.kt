@@ -19,9 +19,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.Subtitles
-import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -72,19 +72,19 @@ fun MultiTrackTimeline(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 CompactStatusChip(
-                    icon = Icons.Rounded.VideoLibrary,
+                    icon = Icons.Rounded.Movie,
                     text = "Visual: Kosong",
                     onClick = onOpenClipsTab,
                     modifier = Modifier.weight(1f)
                 )
                 CompactStatusChip(
-                    icon = Icons.Rounded.MusicNote,
+                    icon = Icons.Rounded.Headphones,
                     text = "Audio: Tiada",
                     onClick = onOpenAudioTab,
                     modifier = Modifier.weight(1f)
                 )
                 CompactStatusChip(
-                    icon = Icons.Rounded.Subtitles,
+                    icon = Icons.Rounded.TextFields,
                     text = "Lirik: 0",
                     onClick = onOpenSubtitlesTab,
                     modifier = Modifier.weight(1f)
@@ -111,6 +111,7 @@ fun MultiTrackTimeline(
                 if (clips.isEmpty()) {
                     TimelinePill(
                         label = "Trek Visual: Kosong (Tap untuk tambah)",
+                        icon = Icons.Rounded.Movie,
                         widthDp = 320,
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         textColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -250,36 +251,52 @@ fun MultiTrackTimeline(
                 }
 
                 val audioLabel = if (audioConfig.uri != null) {
-                    "♪ ${audioConfig.displayName} (${TimeFormatter.formatDurationMs(audioConfig.effectiveAudioDurationMs)})"
+                    "${audioConfig.displayName} (${TimeFormatter.formatDurationMs(audioConfig.effectiveAudioDurationMs)})"
                 } else {
-                    "♪ Tiada lagu dipilih (Tap untuk pilih)"
+                    "Tiada lagu dipilih (Tap untuk pilih)"
                 }
-                Text(
-                    text = audioLabel,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (audioConfig.uri != null) {
-                        MaterialTheme.colorScheme.onSurface
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Row(
                     modifier = Modifier
                         .align(Alignment.CenterStart)
-                        .padding(horizontal = 8.dp)
-                )
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Headphones,
+                        contentDescription = null,
+                        tint = if (audioConfig.uri != null) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = audioLabel,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (audioConfig.uri != null) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
-            // Trek 3: Ringkasan Lirik & Beat
+            // Trek 3: Ringkasan Lirik & Beat (100% ikon vektor tanpa emoji)
             val subLabel = buildString {
-                append("💬 Teks: ${subtitles.size} baris")
+                append("Teks: ${subtitles.size} baris")
                 if (audioConfig.beatMarkersMs.isNotEmpty()) {
                     append("  •  Beat: ${audioConfig.beatMarkersMs.size} tanda")
                 }
             }
             TimelinePill(
                 label = subLabel,
+                icon = Icons.Rounded.TextFields,
                 widthDp = 320,
                 containerColor = if (subtitles.isNotEmpty()) {
                     MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
@@ -339,6 +356,7 @@ private fun CompactStatusChip(
 @Composable
 private fun TimelinePill(
     label: String,
+    icon: ImageVector? = null,
     widthDp: Int,
     containerColor: Color,
     textColor: Color,
@@ -358,7 +376,7 @@ private fun TimelinePill(
         Modifier
     }
 
-    Box(
+    Row(
         modifier = Modifier
             .width(widthDp.dp)
             .height(25.dp)
@@ -367,8 +385,17 @@ private fun TimelinePill(
             .border(BorderStroke(borderWidth, borderColor), RoundedCornerShape(6.dp))
             .then(clickMod)
             .padding(horizontal = 8.dp),
-        contentAlignment = Alignment.CenterStart
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = textColor,
+                modifier = Modifier.size(13.dp)
+            )
+        }
         Text(
             text = label,
             fontSize = 11.sp,

@@ -22,9 +22,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.BrandingWatermark
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.FilterCenterFocus
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.NorthEast
+import androidx.compose.material.icons.rounded.NorthWest
+import androidx.compose.material.icons.rounded.PictureInPictureAlt
+import androidx.compose.material.icons.rounded.SouthEast
+import androidx.compose.material.icons.rounded.SouthWest
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -41,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,8 +76,10 @@ fun WatermarkTabPanel(
     val chipColors = FilterChipDefaults.filterChipColors(
         containerColor = MaterialTheme.colorScheme.surfaceVariant,
         labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
         selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
-        selectedLabelColor = MaterialTheme.colorScheme.primary
+        selectedLabelColor = MaterialTheme.colorScheme.primary,
+        selectedLeadingIconColor = MaterialTheme.colorScheme.primary
     )
     val sliderColors = SliderDefaults.colors(
         thumbColor = MaterialTheme.colorScheme.primary,
@@ -132,7 +140,7 @@ fun WatermarkTabPanel(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.BrandingWatermark,
+                            imageVector = Icons.Rounded.PictureInPictureAlt,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(22.dp)
@@ -237,6 +245,13 @@ fun WatermarkTabPanel(
                                     borderColor = MaterialTheme.colorScheme.outlineVariant,
                                     selectedBorderColor = MaterialTheme.colorScheme.primary
                                 ),
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = iconForWatermarkPosition(pos),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                },
                                 label = { Text(pos.label, fontSize = 11.5.sp) },
                                 modifier = Modifier.height(32.dp)
                             )
@@ -245,5 +260,15 @@ fun WatermarkTabPanel(
                 }
             }
         }
+    }
+}
+
+private fun iconForWatermarkPosition(pos: WatermarkPosition): ImageVector {
+    return when (pos) {
+        WatermarkPosition.TOP_LEFT -> Icons.Rounded.NorthWest
+        WatermarkPosition.TOP_RIGHT -> Icons.Rounded.NorthEast
+        WatermarkPosition.BOTTOM_LEFT -> Icons.Rounded.SouthWest
+        WatermarkPosition.BOTTOM_RIGHT -> Icons.Rounded.SouthEast
+        WatermarkPosition.CENTER -> Icons.Rounded.FilterCenterFocus
     }
 }

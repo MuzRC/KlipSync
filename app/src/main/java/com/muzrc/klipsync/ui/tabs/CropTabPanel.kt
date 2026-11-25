@@ -9,17 +9,29 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CropFree
+import androidx.compose.material.icons.rounded.CropOriginal
+import androidx.compose.material.icons.rounded.CropPortrait
+import androidx.compose.material.icons.rounded.CropSquare
+import androidx.compose.material.icons.rounded.FitScreen
+import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.ZoomOutMap
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,8 +49,10 @@ fun CropTabPanel(
     val chipColors = FilterChipDefaults.filterChipColors(
         containerColor = MaterialTheme.colorScheme.surfaceVariant,
         labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
         selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
-        selectedLabelColor = MaterialTheme.colorScheme.primary
+        selectedLabelColor = MaterialTheme.colorScheme.primary,
+        selectedLeadingIconColor = MaterialTheme.colorScheme.primary
     )
 
     Column(
@@ -82,6 +96,13 @@ fun CropTabPanel(
                                 borderColor = MaterialTheme.colorScheme.outlineVariant,
                                 selectedBorderColor = MaterialTheme.colorScheme.primary
                             ),
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = iconForAspectRatio(preset),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            },
                             label = { Text(preset.label, fontSize = 11.5.sp) },
                             modifier = Modifier.height(34.dp)
                         )
@@ -103,6 +124,11 @@ fun CropTabPanel(
                 ) {
                     CropScaleMode.entries.forEach { mode ->
                         val isSelected = selectedScaleMode == mode
+                        val scaleIcon = if (mode == CropScaleMode.FIT_BLUR) {
+                            Icons.Rounded.FitScreen
+                        } else {
+                            Icons.Rounded.ZoomOutMap
+                        }
                         FilterChip(
                             selected = isSelected,
                             onClick = { onSelectScaleMode(mode) },
@@ -113,6 +139,13 @@ fun CropTabPanel(
                                 borderColor = MaterialTheme.colorScheme.outlineVariant,
                                 selectedBorderColor = MaterialTheme.colorScheme.primary
                             ),
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = scaleIcon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            },
                             label = { Text(mode.label, fontSize = 11.5.sp) },
                             modifier = Modifier.height(34.dp)
                         )
@@ -120,5 +153,16 @@ fun CropTabPanel(
                 }
             }
         }
+    }
+}
+
+private fun iconForAspectRatio(preset: AspectRatioPreset): ImageVector {
+    return when {
+        preset == AspectRatioPreset.ORIGINAL -> Icons.Rounded.CropOriginal
+        preset.label.contains("9:16") -> Icons.Rounded.Smartphone
+        preset.label.contains("16:9") -> Icons.Rounded.Tv
+        preset.label.contains("1:1") -> Icons.Rounded.CropSquare
+        preset.label.contains("4:5") -> Icons.Rounded.CropPortrait
+        else -> Icons.Rounded.CropFree
     }
 }

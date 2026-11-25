@@ -14,15 +14,15 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AspectRatio
-import androidx.compose.material.icons.rounded.BrandingWatermark
-import androidx.compose.material.icons.rounded.BugReport
+import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.Subtitles
-import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.PictureInPictureAlt
+import androidx.compose.material.icons.rounded.SlowMotionVideo
+import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -109,14 +109,14 @@ fun EditorTabBar(
 
 private fun iconForTab(tab: EditorTab): ImageVector {
     return when (tab) {
-        EditorTab.CLIPS -> Icons.Rounded.VideoLibrary
-        EditorTab.SPEED -> Icons.Rounded.Speed
-        EditorTab.COLOR -> Icons.Rounded.Palette
-        EditorTab.AUDIO -> Icons.Rounded.MusicNote
+        EditorTab.CLIPS -> Icons.Rounded.Movie
+        EditorTab.SPEED -> Icons.Rounded.SlowMotionVideo
+        EditorTab.COLOR -> Icons.Rounded.Tune
+        EditorTab.AUDIO -> Icons.Rounded.Headphones
         EditorTab.BEAT -> Icons.Rounded.GraphicEq
-        EditorTab.CROP -> Icons.Rounded.AspectRatio
-        EditorTab.SUBTITLES -> Icons.Rounded.Subtitles
-        EditorTab.WATERMARK -> Icons.Rounded.BrandingWatermark
-        EditorTab.DEV_LOG -> Icons.Rounded.BugReport
+        EditorTab.CROP -> Icons.Rounded.CropFree
+        EditorTab.SUBTITLES -> Icons.Rounded.TextFields
+        EditorTab.WATERMARK -> Icons.Rounded.PictureInPictureAlt
+        EditorTab.DEV_LOG -> Icons.Rounded.Terminal
     }
 }

@@ -6,7 +6,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,12 +26,27 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.AutoAwesomeMotion
+import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.CenterFocusStrong
 import androidx.compose.material.icons.rounded.ContentCut
+import androidx.compose.material.icons.rounded.Contrast
+import androidx.compose.material.icons.rounded.ControlCamera
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.East
 import androidx.compose.material.icons.rounded.Flip
-import androidx.compose.material.icons.rounded.MovieCreation
+import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.LinearScale
+import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RotateRight
+import androidx.compose.material.icons.rounded.StopCircle
+import androidx.compose.material.icons.rounded.Swipe
 import androidx.compose.material.icons.rounded.VideoCall
+import androidx.compose.material.icons.rounded.West
+import androidx.compose.material.icons.rounded.ZoomIn
+import androidx.compose.material.icons.rounded.ZoomOut
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -52,6 +66,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -115,8 +130,10 @@ fun ClipsTabPanel(
     val chipColors = FilterChipDefaults.filterChipColors(
         containerColor = MaterialTheme.colorScheme.surfaceVariant,
         labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
         selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
-        selectedLabelColor = MaterialTheme.colorScheme.primary
+        selectedLabelColor = MaterialTheme.colorScheme.primary,
+        selectedLeadingIconColor = MaterialTheme.colorScheme.primary
     )
 
     Column(
@@ -211,7 +228,7 @@ fun ClipsTabPanel(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.MovieCreation,
+                            imageVector = Icons.Rounded.Movie,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(22.dp)
@@ -266,6 +283,13 @@ fun ClipsTabPanel(
                                     borderColor = MaterialTheme.colorScheme.outlineVariant,
                                     selectedBorderColor = MaterialTheme.colorScheme.primary
                                 ),
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = iconForEndBehavior(behavior),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                },
                                 label = { Text(behavior.label, fontSize = 11.5.sp) }
                             )
                         }
@@ -299,6 +323,11 @@ fun ClipsTabPanel(
                     ) {
                         JoinMode.entries.forEach { mode ->
                             val isSelected = transitionConfig.joinMode == mode
+                            val joinIcon = if (mode == JoinMode.OVERLAP) {
+                                Icons.Rounded.Layers
+                            } else {
+                                Icons.Rounded.LinearScale
+                            }
                             FilterChip(
                                 selected = isSelected,
                                 onClick = { onJoinModeChange(mode) },
@@ -309,6 +338,13 @@ fun ClipsTabPanel(
                                     borderColor = MaterialTheme.colorScheme.outlineVariant,
                                     selectedBorderColor = MaterialTheme.colorScheme.primary
                                 ),
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = joinIcon,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                },
                                 label = { Text(mode.label, fontSize = 11.5.sp) }
                             )
                         }
@@ -337,6 +373,13 @@ fun ClipsTabPanel(
                                     borderColor = MaterialTheme.colorScheme.outlineVariant,
                                     selectedBorderColor = MaterialTheme.colorScheme.primary
                                 ),
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = iconForTransition(type),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                },
                                 label = { Text(type.label, fontSize = 11.5.sp) }
                             )
                         }
@@ -487,12 +530,23 @@ fun ClipsTabPanel(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text = "Gerakan Kamera (Zoom / Pan)",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ControlCamera,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Gerakan Kamera (Zoom / Pan)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         if (clips.size > 1) {
                             TextButton(
                                 onClick = { onApplyMotionToAll(clip.motionEffect, clip.motionIntensity) },
@@ -520,6 +574,13 @@ fun ClipsTabPanel(
                                     borderColor = MaterialTheme.colorScheme.outlineVariant,
                                     selectedBorderColor = MaterialTheme.colorScheme.primary
                                 ),
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = iconForCameraMotion(motion),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                },
                                 label = { Text(motion.label, fontSize = 11.sp) },
                                 modifier = Modifier.height(32.dp)
                             )
@@ -618,5 +679,34 @@ fun ClipsTabPanel(
                 }
             }
         }
+    }
+}
+
+private fun iconForCameraMotion(effect: CameraMotionEffect): ImageVector {
+    return when (effect) {
+        CameraMotionEffect.NONE -> Icons.Rounded.Block
+        CameraMotionEffect.ZOOM_IN -> Icons.Rounded.ZoomIn
+        CameraMotionEffect.ZOOM_OUT -> Icons.Rounded.ZoomOut
+        CameraMotionEffect.PAN_LEFT -> Icons.Rounded.West
+        CameraMotionEffect.PAN_RIGHT -> Icons.Rounded.East
+    }
+}
+
+private fun iconForEndBehavior(behavior: VideoEndBehavior): ImageVector {
+    return when {
+        behavior == VideoEndBehavior.LOOP_TO_AUDIO -> Icons.Rounded.Repeat
+        behavior.label.contains("Zoom", ignoreCase = true) -> Icons.Rounded.CenterFocusStrong
+        else -> Icons.Rounded.StopCircle
+    }
+}
+
+private fun iconForTransition(type: TransitionType): ImageVector {
+    return when {
+        type == TransitionType.NONE -> Icons.Rounded.Block
+        type.label.contains("Cross", ignoreCase = true) -> Icons.Rounded.BlurOn
+        type.label.contains("Fade", ignoreCase = true) -> Icons.Rounded.Contrast
+        type.label.contains("Slide", ignoreCase = true) -> Icons.Rounded.Swipe
+        type.label.contains("Zoom", ignoreCase = true) -> Icons.Rounded.ZoomIn
+        else -> Icons.Rounded.AutoAwesomeMotion
     }
 }

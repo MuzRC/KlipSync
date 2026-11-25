@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -173,7 +173,7 @@ fun LivePreviewCanvas(
                     modifier = Modifier.padding(12.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.VideoLibrary,
+                        imageVector = Icons.Rounded.Movie,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
                         modifier = Modifier.size(26.dp)

@@ -18,9 +18,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Redo
 import androidx.compose.material.icons.automirrored.rounded.Undo
-import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.FolderOpen
-import androidx.compose.material.icons.rounded.NoteAdd
+import androidx.compose.material.icons.rounded.IosShare
+import androidx.compose.material.icons.rounded.PostAdd
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -100,7 +100,7 @@ fun EditorTopBar(
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.NoteAdd,
+                            imageVector = Icons.Rounded.PostAdd,
                             contentDescription = "Projek Baharu",
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
@@ -169,7 +169,7 @@ fun EditorTopBar(
                             .height(34.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.FileUpload,
+                            imageVector = Icons.Rounded.IosShare,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp)
                         )
