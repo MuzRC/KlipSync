@@ -1,6 +1,6 @@
 {
-  "latestVersion": "1.5.2",
-  "versionCode": 152,
-  "releaseNotes": "- Add files via upload\n- chore: kemaskini version.json ke v1.5.0 (build 150) [skip ci]",
-  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.5.2/KlipSync-v1.5.2-signed.apk"
+  "latestVersion": "1.5.4",
+  "versionCode": 154,
+  "releaseNotes": "- Add files via upload\n- chore: kemaskini version.json ke v1.5.2 (build 152) [skip ci]",
+  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.5.4/KlipSync-v1.5.4-signed.apk"
 }
