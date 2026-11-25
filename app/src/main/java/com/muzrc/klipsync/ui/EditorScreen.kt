@@ -56,6 +56,7 @@ import com.muzrc.klipsync.ui.tabs.CropTabPanel
 import com.muzrc.klipsync.ui.tabs.DevLogTabPanel
 import com.muzrc.klipsync.ui.tabs.SpeedTabPanel
 import com.muzrc.klipsync.ui.tabs.SubtitlesTabPanel
+import com.muzrc.klipsync.ui.tabs.TemplatesTabPanel
 import com.muzrc.klipsync.ui.tabs.WatermarkTabPanel
 import com.muzrc.klipsync.util.ExportDebugLogger
 import com.muzrc.klipsync.viewmodel.EditorViewModel
@@ -235,6 +236,13 @@ fun EditorScreen(viewModel: EditorViewModel) {
                             onEndBehaviorChange = { viewModel.setVideoEndBehavior(it) }
                         )
 
+                        EditorTab.TEMPLATES -> TemplatesTabPanel(
+                            activeTemplateId = state.activeTemplateId,
+                            hasClips = state.clips.isNotEmpty(),
+                            onApplyTemplate = { template -> viewModel.applyTemplate(template) },
+                            onResetTemplate = { viewModel.resetTemplateToDefault() }
+                        )
+
                         EditorTab.SPEED -> SpeedTabPanel(
                             selectedClip = state.selectedClip,
                             hasMultipleClips = state.clips.size > 1,
@@ -404,6 +412,7 @@ fun EditorScreen(viewModel: EditorViewModel) {
 private fun EditorTab.isVisualContextTab(): Boolean {
     return when (this) {
         EditorTab.CLIPS,
+        EditorTab.TEMPLATES,
         EditorTab.SPEED,
         EditorTab.COLOR,
         EditorTab.CROP,

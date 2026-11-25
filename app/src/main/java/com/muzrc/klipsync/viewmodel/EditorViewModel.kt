@@ -13,6 +13,7 @@ import com.muzrc.klipsync.media.MediaMetadataReader
 import com.muzrc.klipsync.media.VideoExporter
 import com.muzrc.klipsync.model.AspectRatioPreset
 import com.muzrc.klipsync.model.CameraMotionEffect
+import com.muzrc.klipsync.model.ColorFilterConfig
 import com.muzrc.klipsync.model.ColorFilterPreset
 import com.muzrc.klipsync.model.CropScaleMode
 import com.muzrc.klipsync.model.EditorTab
@@ -22,10 +23,13 @@ import com.muzrc.klipsync.model.ExportResolution
 import com.muzrc.klipsync.model.ExportState
 import com.muzrc.klipsync.model.JoinMode
 import com.muzrc.klipsync.model.SubtitleItem
+import com.muzrc.klipsync.model.TransitionConfig
 import com.muzrc.klipsync.model.TransitionType
 import com.muzrc.klipsync.model.UpdateCheckState
 import com.muzrc.klipsync.model.VideoClip
 import com.muzrc.klipsync.model.VideoEndBehavior
+import com.muzrc.klipsync.model.VideoTemplate
+import com.muzrc.klipsync.model.VideoTemplatePresets
 import com.muzrc.klipsync.model.WatermarkPosition
 import com.muzrc.klipsync.preview.PreviewPlayerController
 import com.muzrc.klipsync.util.DraftStorageManager
@@ -66,7 +70,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private var playbackTickerJob: Job? = null
     private var exportJob: Job? = null
-    private var autosaveJob: Job? = null // <-- Tambah untuk Autosave
+    private var autosaveJob: Job? = null
 
     init {
         ExportDebugLogger.init(appContext)
@@ -160,20 +164,17 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 playerController.seekTo(clampedPos)
             }
 
-            // --- TAMBAH: Panggil Autosave ---
             scheduleAutosave(finalState)
 
             finalState
         }
     }
 
-    // Fungsi Autosave baru
     private fun scheduleAutosave(state: EditorUiState) {
         if (state.clips.isEmpty()) return
 
         autosaveJob?.cancel()
         autosaveJob = viewModelScope.launch {
-            // Tunggu 3 saat sebelum menyimpan (debounce)
             delay(3000L)
             val snapshot = state.copy(projectName = "Autosave")
             DraftStorageManager.saveDraft(appContext, snapshot, "Autosave")
@@ -184,8 +185,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun createNewProject() {
         pausePlayback()
         exportJob?.cancel()
-        autosaveJob?.cancel() // Batalkan autosave sedia ada
-        
+        autosaveJob?.cancel()
+
         undoStack.clear()
         redoStack.clear()
         lastContinuousActionKey = ""
@@ -195,8 +196,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = freshState
         syncPreviewWithState(freshState)
         playerController.seekTo(0L)
-        
-        // Padam fail autosave lama (pilihan, untuk bersihkan storan)
+
         viewModelScope.launch {
             DraftStorageManager.deleteDraft(appContext, "autosave_draft.json")
         }
@@ -222,7 +222,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = restored
         syncPreviewWithState(restored)
         playerController.seekTo(safePos)
-        scheduleAutosave(restored) // Simpan selepas undo
+        scheduleAutosave(restored)
     }
 
     fun redo() {
@@ -245,11 +245,59 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.value = restored
         syncPreviewWithState(restored)
         playerController.seekTo(safePos)
-        scheduleAutosave(restored) // Simpan selepas redo
+        scheduleAutosave(restored)
     }
 
     fun selectTab(tab: EditorTab) {
         _uiState.update { it.copy(activeTab = tab) }
+    }
+
+    // --- Template Siap Sedia ---
+    fun applyTemplate(template: VideoTemplate) {
+        pausePlayback()
+        updateProjectState(syncPreview = true) { state ->
+            val safeIntensity = template.motionIntensity.coerceIn(0.05f, 0.50f)
+            val safeSpeed = template.clipSpeed.coerceIn(0.25f, 4.0f)
+
+            val styledClips = state.clips.map { clip ->
+                clip.copy(
+                    motionEffect = template.motionEffect,
+                    motionIntensity = safeIntensity,
+                    speed = if (!clip.isImage) safeSpeed else clip.speed
+                )
+            }
+
+            state.copy(
+                clips = styledClips,
+                aspectRatio = template.aspectRatio,
+                cropScaleMode = template.cropScaleMode,
+                colorConfig = template.colorConfig,
+                transitionConfig = template.transitionConfig,
+                activeTemplateId = template.id
+            )
+        }
+    }
+
+    fun resetTemplateToDefault() {
+        pausePlayback()
+        updateProjectState(syncPreview = true) { state ->
+            val resetClips = state.clips.map { clip ->
+                clip.copy(
+                    motionEffect = CameraMotionEffect.NONE,
+                    motionIntensity = 0.20f,
+                    speed = if (!clip.isImage) 1.0f else clip.speed
+                )
+            }
+
+            state.copy(
+                clips = resetClips,
+                aspectRatio = AspectRatioPreset.TIKTOK_9_16,
+                cropScaleMode = CropScaleMode.FILL_CROP,
+                colorConfig = ColorFilterConfig(),
+                transitionConfig = TransitionConfig(),
+                activeTemplateId = null
+            )
+        }
     }
 
     fun selectClip(clipId: String) {
@@ -290,9 +338,23 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         if (uris.isEmpty()) return
         pausePlayback()
         viewModelScope.launch {
+            val activeTemplate = VideoTemplatePresets.findById(_uiState.value.activeTemplateId)
             val newClips = uris.map { uri ->
                 DraftStorageManager.takePersistablePermissionIfPossible(appContext, uri)
-                metadataReader.readMediaClip(uri)
+                val rawClip = metadataReader.readMediaClip(uri)
+                if (activeTemplate != null) {
+                    rawClip.copy(
+                        motionEffect = activeTemplate.motionEffect,
+                        motionIntensity = activeTemplate.motionIntensity.coerceIn(0.05f, 0.50f),
+                        speed = if (!rawClip.isImage) {
+                            activeTemplate.clipSpeed.coerceIn(0.25f, 4.0f)
+                        } else {
+                            rawClip.speed
+                        }
+                    )
+                } else {
+                    rawClip
+                }
             }
             updateProjectState(syncPreview = true) { state ->
                 val merged = state.clips + newClips
@@ -1098,7 +1160,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         playbackTickerJob?.cancel()
         exportJob?.cancel()
-        autosaveJob?.cancel() // <-- Batalkan autosave
+        autosaveJob?.cancel()
         playerController.release()
         super.onCleared()
     }

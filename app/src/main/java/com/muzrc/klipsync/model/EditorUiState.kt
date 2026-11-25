@@ -2,6 +2,7 @@ package com.muzrc.klipsync.model
 
 enum class EditorTab(val title: String) {
     CLIPS("Klip"),
+    TEMPLATES("Template"),
     SPEED("Laju"),
     COLOR("Warna"),
     AUDIO("Audio"),
@@ -33,7 +34,8 @@ data class EditorUiState(
     val exportConfig: ExportConfig = ExportConfig(),
     val exportState: ExportState = ExportState.Idle,
     val updateCheckState: UpdateCheckState = UpdateCheckState.Idle,
-    val statusMessage: String? = null
+    val statusMessage: String? = null,
+    val activeTemplateId: String? = null
 ) {
     // ===== Pemilihan klip =====
 
@@ -113,8 +115,8 @@ data class EditorUiState(
     /**
      * Durasi timeline akhir selepas mengambil kira audio dan endBehavior.
      * Konsisten dengan apa yang VideoSequenceBuilder hasilkan:
-     * - Jika ada audio dan audio lebih panjang → ikut audio (dengan FREEZE_FRAME/LOOP_TO_AUDIO).
-     * - Jika tiada audio atau audio lebih pendek → ikut video.
+     * - Jika ada audio dan audio lebih panjang -> ikut audio (dengan FREEZE_FRAME/LOOP_TO_AUDIO).
+     * - Jika tiada audio atau audio lebih pendek -> ikut video.
      */
     val finalTimelineDurationMs: Long
         get() {

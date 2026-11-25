@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
@@ -110,6 +111,7 @@ fun EditorTabBar(
 private fun iconForTab(tab: EditorTab): ImageVector {
     return when (tab) {
         EditorTab.CLIPS -> Icons.Rounded.Movie
+        EditorTab.TEMPLATES -> Icons.Rounded.AutoAwesome
         EditorTab.SPEED -> Icons.Rounded.SlowMotionVideo
         EditorTab.COLOR -> Icons.Rounded.Tune
         EditorTab.AUDIO -> Icons.Rounded.Headphones
