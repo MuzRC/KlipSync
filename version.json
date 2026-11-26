@@ -1,6 +1,6 @@
 {
-  "latestVersion": "1.6.8",
-  "versionCode": 168,
-  "releaseNotes": "- Update UpdateDialog.kt\n- Add files via upload\n- Add files via upload\n- Update EditorTopBar.kt\n- chore: kemaskini version.json ke v1.6.3 (build 163) [skip ci]",
-  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.6.8/KlipSync-v1.6.8-signed.apk"
+  "latestVersion": "1.7.0",
+  "versionCode": 170,
+  "releaseNotes": "- Add files via upload\n- chore: kemaskini version.json ke v1.6.8 (build 168) [skip ci]",
+  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.7.0/KlipSync-v1.7.0-signed.apk"
 }
