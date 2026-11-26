@@ -1,6 +1,6 @@
 {
-  "latestVersion": "1.6.3",
-  "versionCode": 163,
-  "releaseNotes": "- Add files via upload\n- Update LivePreviewCanvas.kt\n- Update PlaybackControlBar.kt\n- chore: kemaskini version.json ke v1.5.9 (build 159) [skip ci]",
-  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.6.3/KlipSync-v1.6.3-signed.apk"
+  "latestVersion": "1.6.8",
+  "versionCode": 168,
+  "releaseNotes": "- Update UpdateDialog.kt\n- Add files via upload\n- Add files via upload\n- Update EditorTopBar.kt\n- chore: kemaskini version.json ke v1.6.3 (build 163) [skip ci]",
+  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.6.8/KlipSync-v1.6.8-signed.apk"
 }
