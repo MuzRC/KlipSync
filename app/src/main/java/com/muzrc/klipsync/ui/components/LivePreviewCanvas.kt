@@ -10,9 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -79,6 +78,7 @@ fun LivePreviewCanvas(
     isInFreezeFrameZone: Boolean,
     transitionVisual: PreviewTransitionVisual = PreviewTransitionVisual(),
     motionVisual: PreviewClipMotionVisual = PreviewClipMotionVisual(),
+    isFullscreen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -117,37 +117,41 @@ fun LivePreviewCanvas(
         }
     }
 
-    Box(
+    val outerPaddingHorizontal = if (isFullscreen) 0.dp else 12.dp
+    val outerPaddingVertical = if (isFullscreen) 0.dp else 8.dp
+    val frameCornerRadius = if (isFullscreen) 0.dp else 10.dp
+
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .background(ObsidianVoid)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .background(if (isFullscreen) Color.Black else ObsidianVoid)
+            .padding(horizontal = outerPaddingHorizontal, vertical = outerPaddingVertical),
         contentAlignment = Alignment.Center
     ) {
         val ratio = aspectRatio.aspectRatioFloat
-        val frameModifier = if (ratio != null) {
-            if (ratio >= 1f) {
-                Modifier
-                    .fillMaxWidth(0.92f)
-                    .aspectRatio(ratio)
+        val frameModifier = if (ratio != null && ratio > 0f && maxWidth > 0.dp && maxHeight > 0.dp) {
+            val containerRatio = maxWidth.value / maxHeight.value
+            if (containerRatio > ratio) {
+                val targetHeight = maxHeight
+                val targetWidth = targetHeight * ratio
+                Modifier.size(width = targetWidth, height = targetHeight)
             } else {
-                Modifier
-                    .fillMaxHeight()
-                    .aspectRatio(ratio)
+                val targetWidth = maxWidth
+                val targetHeight = targetWidth / ratio
+                Modifier.size(width = targetWidth, height = targetHeight)
             }
         } else {
             Modifier.fillMaxSize()
         }
 
-        // Bingkai Kanvas Dinamik sentiasa aktif supaya pengguna terus nampak perubahan nisbah skrin
         if (!hasClips) {
             Box(
                 modifier = frameModifier
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(frameCornerRadius))
                     .background(MaterialTheme.colorScheme.surface)
                     .border(
                         BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-                        RoundedCornerShape(10.dp)
+                        RoundedCornerShape(frameCornerRadius)
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -186,7 +190,7 @@ fun LivePreviewCanvas(
                     )
                 }
             }
-            return@Box
+            return@BoxWithConstraints
         }
 
         val freezeZoomScale = if (isInFreezeFrameZone && freezeFrameExtensionMs > 0L) {
@@ -216,14 +220,20 @@ fun LivePreviewCanvas(
             0f, 0f, 0f, 1f, 0f
         )
 
+        val borderModifier = if (isFullscreen) {
+            Modifier
+        } else {
+            Modifier.border(
+                BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.30f)),
+                RoundedCornerShape(frameCornerRadius)
+            )
+        }
+
         Box(
             modifier = frameModifier
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(frameCornerRadius))
                 .background(containerBg)
-                .border(
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.30f)),
-                    RoundedCornerShape(10.dp)
-                )
+                .then(borderModifier)
         ) {
             if (activeClip?.isImage == true && activeImageBitmap != null) {
                 val imgScale = if (
@@ -311,7 +321,7 @@ fun LivePreviewCanvas(
                     contentDescription = "Logo",
                     modifier = Modifier
                         .align(wmAlign)
-                        .padding(10.dp)
+                        .padding(if (isFullscreen) 16.dp else 10.dp)
                         .fillMaxWidth(watermarkConfig.clampedScalePercent)
                         .alpha(watermarkConfig.clampedOpacity)
                 )
@@ -334,6 +344,7 @@ fun LivePreviewCanvas(
             val activeSubtitles = subtitles.filter {
                 currentPositionMs in it.startMs..it.endMs && it.hasValidText
             }
+            val subtitleScaleFactor = if (isFullscreen) 1.0f else 0.72f
 
             activeSubtitles.forEach { item ->
                 val alignment = when (item.position) {
@@ -358,12 +369,15 @@ fun LivePreviewCanvas(
                 Box(
                     modifier = Modifier
                         .align(alignment)
-                        .padding(horizontal = 14.dp, vertical = 18.dp)
+                        .padding(
+                            horizontal = if (isFullscreen) 20.dp else 14.dp,
+                            vertical = if (isFullscreen) 28.dp else 18.dp
+                        )
                 ) {
                     Text(
                         text = item.text,
                         color = Color(item.textColorArgb),
-                        fontSize = (item.clampedFontSizeSp * 0.72f).sp,
+                        fontSize = (item.clampedFontSizeSp * subtitleScaleFactor).sp,
                         fontFamily = fontFamily,
                         fontWeight = fontWeight,
                         textAlign = TextAlign.Center,
