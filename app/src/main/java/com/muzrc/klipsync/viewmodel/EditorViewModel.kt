@@ -1,6 +1,7 @@
 package com.muzrc.klipsync.viewmodel
 
 import android.app.Application
+import android.app.DownloadManager
 import android.net.Uri
 import android.os.SystemClock
 import androidx.annotation.OptIn
@@ -26,6 +27,7 @@ import com.muzrc.klipsync.model.SubtitleItem
 import com.muzrc.klipsync.model.TransitionConfig
 import com.muzrc.klipsync.model.TransitionType
 import com.muzrc.klipsync.model.UpdateCheckState
+import com.muzrc.klipsync.model.UpdateReleaseData
 import com.muzrc.klipsync.model.VideoClip
 import com.muzrc.klipsync.model.VideoEndBehavior
 import com.muzrc.klipsync.model.VideoTemplate
@@ -71,6 +73,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private var playbackTickerJob: Job? = null
     private var exportJob: Job? = null
     private var autosaveJob: Job? = null
+    private var updateDownloadJob: Job? = null
+    private var activeDownloadId: Long = -1L
+    private var activeDownloadRelease: UpdateReleaseData? = null
+    private var isUpdateDialogHiddenByUser: Boolean = false
 
     init {
         ExportDebugLogger.init(appContext)
@@ -1144,16 +1150,175 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         ExportDebugLogger.clear(appContext)
     }
 
-    // --- Semak Kemas Kini Manual ---
+    // --- Semak & Muat Turun Kemas Kini (Background + Progress Bar) ---
     fun checkForUpdatesManual() {
+        val currentRelease = activeDownloadRelease
+        if (activeDownloadId > 0L && currentRelease != null && updateDownloadJob?.isActive == true) {
+            isUpdateDialogHiddenByUser = false
+            val snap = UpdateChecker.queryDownloadProgress(appContext, activeDownloadId)
+            if (snap != null && snap.status == DownloadManager.STATUS_SUCCESSFUL) {
+                _uiState.update {
+                    it.copy(
+                        updateCheckState = UpdateCheckState.ReadyToInstall(
+                            release = currentRelease,
+                            downloadId = activeDownloadId,
+                            localUriString = snap.localUri
+                        )
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        updateCheckState = UpdateCheckState.Downloading(
+                            release = currentRelease,
+                            downloadId = activeDownloadId,
+                            progressPercent = snap?.progressPercent ?: 0,
+                            downloadedBytes = snap?.bytesDownloaded ?: 0L,
+                            totalBytes = snap?.bytesTotal ?: -1L
+                        )
+                    )
+                }
+            }
+            return
+        }
+
         viewModelScope.launch {
+            isUpdateDialogHiddenByUser = false
             _uiState.update { it.copy(updateCheckState = UpdateCheckState.Checking()) }
             val result = UpdateChecker.checkForUpdates()
             _uiState.update { it.copy(updateCheckState = result) }
         }
     }
 
+    fun startUpdateDownload(release: UpdateReleaseData) {
+        updateDownloadJob?.cancel()
+        isUpdateDialogHiddenByUser = false
+
+        val downloadId = UpdateChecker.enqueueApkDownload(appContext, release)
+        if (downloadId <= 0L) {
+            _uiState.update {
+                it.copy(
+                    updateCheckState = UpdateCheckState.Error(
+                        message = "Gagal memulakan muat turun kemas kini. Sila semak pautan APK.",
+                        errorCode = UpdateCheckState.ErrorCode.NETWORK
+                    )
+                )
+            }
+            return
+        }
+
+        activeDownloadId = downloadId
+        activeDownloadRelease = release
+
+        _uiState.update {
+            it.copy(
+                updateCheckState = UpdateCheckState.Downloading(
+                    release = release,
+                    downloadId = downloadId,
+                    progressPercent = 0,
+                    downloadedBytes = 0L,
+                    totalBytes = -1L
+                )
+            )
+        }
+
+        updateDownloadJob = viewModelScope.launch {
+            while (isActive) {
+                delay(400L)
+                val snap = UpdateChecker.queryDownloadProgress(appContext, downloadId)
+                if (snap == null) {
+                    activeDownloadId = -1L
+                    activeDownloadRelease = null
+                    isUpdateDialogHiddenByUser = false
+                    _uiState.update {
+                        it.copy(
+                            updateCheckState = UpdateCheckState.Error(
+                                message = "Muat turun kemas kini telah dibatalkan atau terhenti.",
+                                errorCode = UpdateCheckState.ErrorCode.NETWORK
+                            )
+                        )
+                    }
+                    break
+                }
+
+                when (snap.status) {
+                    DownloadManager.STATUS_PENDING,
+                    DownloadManager.STATUS_PAUSED,
+                    DownloadManager.STATUS_RUNNING -> {
+                        if (!isUpdateDialogHiddenByUser) {
+                            _uiState.update {
+                                it.copy(
+                                    updateCheckState = UpdateCheckState.Downloading(
+                                        release = release,
+                                        downloadId = downloadId,
+                                        progressPercent = snap.progressPercent,
+                                        downloadedBytes = snap.bytesDownloaded,
+                                        totalBytes = snap.bytesTotal
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    DownloadManager.STATUS_SUCCESSFUL -> {
+                        isUpdateDialogHiddenByUser = false
+                        _uiState.update {
+                            it.copy(
+                                updateCheckState = UpdateCheckState.ReadyToInstall(
+                                    release = release,
+                                    downloadId = downloadId,
+                                    localUriString = snap.localUri
+                                )
+                            )
+                        }
+                        UpdateChecker.installDownloadedApk(
+                            context = appContext,
+                            downloadId = downloadId,
+                            fallbackLocalUri = snap.localUri
+                        )
+                        break
+                    }
+
+                    DownloadManager.STATUS_FAILED -> {
+                        activeDownloadId = -1L
+                        activeDownloadRelease = null
+                        isUpdateDialogHiddenByUser = false
+                        _uiState.update {
+                            it.copy(
+                                updateCheckState = UpdateCheckState.Error(
+                                    message = "Muat turun APK gagal (kod: ${snap.reason}). Sila cuba semula.",
+                                    errorCode = UpdateCheckState.ErrorCode.NETWORK
+                                )
+                            )
+                        }
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    fun cancelUpdateDownload(downloadId: Long) {
+        updateDownloadJob?.cancel()
+        activeDownloadId = -1L
+        activeDownloadRelease = null
+        isUpdateDialogHiddenByUser = false
+        UpdateChecker.cancelDownload(appContext, downloadId)
+        _uiState.update { it.copy(updateCheckState = UpdateCheckState.Idle) }
+    }
+
+    fun installDownloadedUpdate(downloadId: Long, localUriString: String?) {
+        UpdateChecker.installDownloadedApk(
+            context = appContext,
+            downloadId = downloadId,
+            fallbackLocalUri = localUriString
+        )
+    }
+
     fun dismissUpdateDialog() {
+        if (_uiState.value.updateCheckState is UpdateCheckState.Downloading) {
+            isUpdateDialogHiddenByUser = true
+        }
         _uiState.update { it.copy(updateCheckState = UpdateCheckState.Idle) }
     }
 
@@ -1161,6 +1326,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         playbackTickerJob?.cancel()
         exportJob?.cancel()
         autosaveJob?.cancel()
+        updateDownloadJob?.cancel()
         playerController.release()
         super.onCleared()
     }

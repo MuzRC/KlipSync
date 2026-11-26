@@ -620,6 +620,9 @@ fun EditorScreen(viewModel: EditorViewModel) {
 
     UpdateDialog(
         state = state.updateCheckState,
+        onStartDownload = { release -> viewModel.startUpdateDownload(release) },
+        onCancelDownload = { downloadId -> viewModel.cancelUpdateDownload(downloadId) },
+        onInstallApk = { downloadId, localUri -> viewModel.installDownloadedUpdate(downloadId, localUri) },
         onDismiss = { viewModel.dismissUpdateDialog() }
     )
 }
