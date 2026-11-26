@@ -1,6 +1,6 @@
 {
-  "latestVersion": "1.5.9",
-  "versionCode": 159,
-  "releaseNotes": "- Update BeatDetector.kt\n- chore: kemaskini version.json ke v1.5.7 (build 157) [skip ci]",
-  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.5.9/KlipSync-v1.5.9-signed.apk"
+  "latestVersion": "1.6.3",
+  "versionCode": 163,
+  "releaseNotes": "- Add files via upload\n- Update LivePreviewCanvas.kt\n- Update PlaybackControlBar.kt\n- chore: kemaskini version.json ke v1.5.9 (build 159) [skip ci]",
+  "downloadUrl": "https://github.com/MuzRC/KlipSync/releases/download/v1.6.3/KlipSync-v1.6.3-signed.apk"
 }
