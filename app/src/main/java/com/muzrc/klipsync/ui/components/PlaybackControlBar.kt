@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
@@ -40,6 +41,7 @@ fun PlaybackControlBar(
     totalDurationMs: Long,
     isPreviewVisible: Boolean = true,
     onTogglePreview: () -> Unit = {},
+    onEnterFullscreen: () -> Unit = {},
     onTogglePlayPause: () -> Unit,
     onSeek: (Long) -> Unit
 ) {
@@ -117,6 +119,44 @@ fun PlaybackControlBar(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            // Butang Skrin Penuh (Fullscreen Preview)
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (playEnabled) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    )
+                    .border(
+                        BorderStroke(
+                            1.dp,
+                            if (playEnabled) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                            } else {
+                                MaterialTheme.colorScheme.outlineVariant
+                            }
+                        ),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .clickable { onEnterFullscreen() }
+                    .padding(horizontal = 7.dp, vertical = 5.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Fullscreen,
+                    contentDescription = "Skrin Penuh",
+                    tint = if (playEnabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(16.dp)
+                )
+            }
 
             // Butang Lipat / Kembang Kanvas Preview (Hybrid Control)
             Row(
