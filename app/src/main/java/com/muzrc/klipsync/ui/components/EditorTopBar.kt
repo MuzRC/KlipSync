@@ -20,9 +20,12 @@ import androidx.compose.material.icons.automirrored.rounded.Redo
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.IosShare
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PostAdd
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,10 +33,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.muzrc.klipsync.BuildConfig
@@ -49,6 +57,8 @@ fun EditorTopBar(
     onDraftsClick: () -> Unit,
     onExportClick: () -> Unit
 ) {
+    var showProjectMenu by remember { mutableStateOf(false) }
+
     Surface(
         color = MaterialTheme.colorScheme.surface
     ) {
@@ -61,31 +71,34 @@ fun EditorTopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
                         text = "KlipSync",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        softWrap = false,
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(RoundedCornerShape(5.dp))
                             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
                             .border(
                                 BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)),
-                                RoundedCornerShape(6.dp)
+                                RoundedCornerShape(5.dp)
                             )
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
                     ) {
                         Text(
                             text = "v${BuildConfig.VERSION_NAME}",
-                            fontSize = 10.sp,
+                            fontSize = 9.5.sp,
                             fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false,
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -93,24 +106,12 @@ fun EditorTopBar(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    IconButton(
-                        onClick = onNewProjectClick,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.PostAdd,
-                            contentDescription = "Projek Baharu",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
                     IconButton(
                         onClick = onUndoClick,
                         enabled = canUndo,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.Undo,
@@ -120,14 +121,14 @@ fun EditorTopBar(
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.48f)
                             },
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
 
                     IconButton(
                         onClick = onRedoClick,
                         enabled = canRedo,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.Redo,
@@ -137,20 +138,74 @@ fun EditorTopBar(
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.48f)
                             },
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
 
-                    IconButton(
-                        onClick = onDraftsClick,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.FolderOpen,
-                            contentDescription = "Draf Projek",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    Box {
+                        IconButton(
+                            onClick = { showProjectMenu = true },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.MoreVert,
+                                contentDescription = "Menu Projek",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showProjectMenu,
+                            onDismissRequest = { showProjectMenu = false },
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Projek Baharu",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.PostAdd,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showProjectMenu = false
+                                    onNewProjectClick()
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Draf Projek",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.FolderOpen,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                },
+                                onClick = {
+                                    showProjectMenu = false
+                                    onDraftsClick()
+                                }
+                            )
+                        }
                     }
 
                     Button(
@@ -163,7 +218,7 @@ fun EditorTopBar(
                             disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                             disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                         ),
-                        contentPadding = PaddingValues(horizontal = 13.dp, vertical = 0.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                         modifier = Modifier
                             .padding(start = 4.dp)
                             .height(34.dp)
@@ -171,12 +226,15 @@ fun EditorTopBar(
                         Icon(
                             imageVector = Icons.Rounded.IosShare,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                         Text(
                             text = "Eksport",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(start = 4.dp)
                         )
                     }
