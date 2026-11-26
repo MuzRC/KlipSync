@@ -59,8 +59,7 @@ fun UpdateDialog(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = "Nota Perubahan:
-${state.release.releaseNotes}",
+                            text = "Nota Perubahan:\n${state.release.releaseNotes}",
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
@@ -149,9 +148,7 @@ ${state.release.releaseNotes}",
                 is UpdateCheckState.UpdateAvailable -> {
                     Button(
                         onClick = {
-                            if (state.release.downloadUrl.endsWith(".apk", ignoreCase = true)) {
-                                onStartDownload(state.release)
-                            } else if (state.release.hasValidUrl) {
+                            if (state.release.hasValidUrl) {
                                 onStartDownload(state.release)
                             } else {
                                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(state.release.downloadUrl))
