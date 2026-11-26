@@ -62,7 +62,6 @@ class PreviewPlayerController(context: Context) {
         this.audioConfig = audio
         this.endBehavior = transitionConfig.endBehavior
 
-        // Sentiasa kemas kini cache klip supaya perubahan Zoom/Pan, Putaran & Cermin terus aktif
         expandedClipsCache = clips.flatMap { clip ->
             List(clip.clampedLoopCount) { clip }
         }
@@ -182,7 +181,6 @@ class PreviewPlayerController(context: Context) {
         val uri = audio.uri ?: return
         if (audio.effectiveAudioDurationMs <= 0L) return
 
-        // Validasi offset supaya clipping tidak crash.
         val safeStart = audio.startOffsetMs.coerceIn(0L, audio.totalDurationMs)
         if (audio.totalDurationMs <= safeStart) return
 
@@ -216,6 +214,19 @@ class PreviewPlayerController(context: Context) {
             acc += dur
         }
         return clipPlayedDurationsMs.lastIndex
+    }
+
+    fun getClipStartPositionMs(clipId: String): Long? {
+        if (expandedClipsCache.isEmpty() || clipPlayedDurationsMs.isEmpty()) return null
+        var acc = 0L
+        val limit = minOf(expandedClipsCache.size, clipPlayedDurationsMs.size)
+        for (i in 0 until limit) {
+            if (expandedClipsCache[i].id == clipId) {
+                return acc
+            }
+            acc += clipPlayedDurationsMs[i]
+        }
+        return null
     }
 
     fun currentActiveClipAt(positionMs: Long): VideoClip? {
@@ -311,7 +322,6 @@ class PreviewPlayerController(context: Context) {
             positionMs
         }
 
-        // Clamp transitionDurationMs supaya konsisten dengan VideoSequenceBuilder.
         val safeTransDurMs = transitionDurationMs.coerceIn(0L, 3_000L)
 
         var acc = 0L

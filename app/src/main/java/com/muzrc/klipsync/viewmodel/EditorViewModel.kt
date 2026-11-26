@@ -63,7 +63,6 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _drafts = MutableStateFlow<List<SavedDraftSummary>>(emptyList())
     val drafts: StateFlow<List<SavedDraftSummary>> = _drafts.asStateFlow()
 
-    // Sejarah Undo / Redo (maksimum 25 langkah)
     private val undoStack = ArrayDeque<EditorUiState>()
     private val redoStack = ArrayDeque<EditorUiState>()
     private val maxHistorySteps = 25
@@ -314,18 +313,40 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        var targetStartMs = 0L
-        val overlapPerJoin = if (state.transitionConfig.joinMode == JoinMode.OVERLAP) {
-            state.transitionConfig.clampedDurationMs
-        } else {
-            0L
-        }
-
-        for (i in 0 until targetIndex) {
-            targetStartMs += state.clips[i].effectiveDurationMs
-            if (overlapPerJoin > 0L) {
-                targetStartMs = (targetStartMs - overlapPerJoin).coerceAtLeast(0L)
+        val targetStartMs = playerController.getClipStartPositionMs(clipId) ?: run {
+            val totalExpandedCount = state.clips.sumOf { it.clampedLoopCount }
+            val overlapHalfMs = if (
+                state.transitionConfig.joinMode == JoinMode.OVERLAP &&
+                totalExpandedCount > 1
+            ) {
+                (state.transitionConfig.clampedDurationMs / 2L).coerceAtLeast(0L)
+            } else {
+                0L
             }
+
+            var acc = 0L
+            var expandedIdx = 0
+            for (i in 0 until targetIndex) {
+                val clip = state.clips[i]
+                val safeSpeed = if (clip.isImage) 1.0f else clip.clampedSpeed
+                repeat(clip.clampedLoopCount) {
+                    val isFirst = expandedIdx == 0
+                    val isLast = expandedIdx == totalExpandedCount - 1
+                    val start = if (!isFirst) {
+                        (clip.trimStartMs + (overlapHalfMs * safeSpeed).toLong()).coerceAtMost(clip.trimEndMs)
+                    } else {
+                        clip.trimStartMs
+                    }
+                    val end = if (!isLast) {
+                        (clip.trimEndMs - (overlapHalfMs * safeSpeed).toLong()).coerceAtLeast(start)
+                    } else {
+                        clip.trimEndMs
+                    }
+                    acc += ((end - start) / safeSpeed).toLong().coerceAtLeast(0L)
+                    expandedIdx++
+                }
+            }
+            acc
         }
 
         pausePlayback()
