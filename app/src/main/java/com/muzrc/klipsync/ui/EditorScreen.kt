@@ -1,5 +1,6 @@
 package com.muzrc.klipsync.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -8,20 +9,37 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.FullscreenExit
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,7 +51,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
 import com.muzrc.klipsync.model.EditorTab
 import com.muzrc.klipsync.model.ExportState
@@ -59,6 +81,7 @@ import com.muzrc.klipsync.ui.tabs.SubtitlesTabPanel
 import com.muzrc.klipsync.ui.tabs.TemplatesTabPanel
 import com.muzrc.klipsync.ui.tabs.WatermarkTabPanel
 import com.muzrc.klipsync.util.ExportDebugLogger
+import com.muzrc.klipsync.util.TimeFormatter
 import com.muzrc.klipsync.viewmodel.EditorViewModel
 
 @OptIn(UnstableApi::class)
@@ -74,12 +97,16 @@ fun EditorScreen(viewModel: EditorViewModel) {
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var editingSubtitle by remember { mutableStateOf<SubtitleItem?>(null) }
 
-    // Gabungan Smart Hybrid Preview: auto-buka pada tab visual, auto-lipat pada tab audio/teknikal,
-    // tetapi tetap boleh ditogol secara manual oleh pengguna bila-bila masa.
     var isPreviewVisible by remember { mutableStateOf(state.activeTab.isVisualContextTab()) }
+    var isFullscreenPreview by remember { mutableStateOf(false) }
+    var showFullscreenControls by remember { mutableStateOf(true) }
 
     LaunchedEffect(state.activeTab) {
         isPreviewVisible = state.activeTab.isVisualContextTab()
+    }
+
+    BackHandler(enabled = isFullscreenPreview) {
+        isFullscreenPreview = false
     }
 
     val isInFreezeFrameZone = state.clips.isNotEmpty() &&
@@ -97,241 +124,429 @@ fun EditorScreen(viewModel: EditorViewModel) {
         positionMs = state.currentPositionMs
     )
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            EditorTopBar(
-                hasClips = state.clips.isNotEmpty(),
-                canUndo = state.canUndo,
-                canRedo = state.canRedo,
-                onNewProjectClick = {
-                    viewModel.pausePlayback()
-                    if (state.hasAnyContent) {
-                        showNewProjectConfirmDialog = true
-                    } else {
-                        viewModel.createNewProject()
-                    }
-                },
-                onUndoClick = { viewModel.undo() },
-                onRedoClick = { viewModel.redo() },
-                onDraftsClick = {
-                    viewModel.pausePlayback()
-                    viewModel.refreshDrafts()
-                    showDraftsDialog = true
-                },
-                onExportClick = {
-                    viewModel.pausePlayback()
-                    showExportDialog = true
-                }
-            )
-        }
-    ) { innerPadding ->
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .navigationBarsPadding()
-                .background(MaterialTheme.colorScheme.background)
-        ) {
-            val previewHeight = (maxHeight * 0.31f).coerceIn(170.dp, 260.dp)
-
-            Column(modifier = Modifier.fillMaxSize()) {
-                AnimatedVisibility(
-                    visible = isPreviewVisible,
-                    enter = expandVertically(
-                        expandFrom = Alignment.Top,
-                        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(durationMillis = 180)),
-                    exit = shrinkVertically(
-                        shrinkTowards = Alignment.Top,
-                        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
-                    ) + fadeOut(animationSpec = tween(durationMillis = 150))
-                ) {
-                    LivePreviewCanvas(
-                        videoPlayer = viewModel.playerController.videoPlayer,
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (!isFullscreenPreview) {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                topBar = {
+                    EditorTopBar(
                         hasClips = state.clips.isNotEmpty(),
-                        activeClip = currentPlayingClip,
-                        aspectRatio = state.aspectRatio,
-                        cropScaleMode = state.cropScaleMode,
-                        colorConfig = state.colorConfig,
-                        subtitles = state.subtitles,
-                        watermarkConfig = state.watermarkConfig,
-                        currentPositionMs = state.currentPositionMs,
-                        totalVideoDurationMs = state.totalVideoDurationMs,
-                        freezeFrameExtensionMs = state.freezeFrameExtensionMs,
-                        isInFreezeFrameZone = isInFreezeFrameZone,
-                        transitionVisual = transitionVisual,
-                        motionVisual = motionVisual,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(previewHeight)
+                        canUndo = state.canUndo,
+                        canRedo = state.canRedo,
+                        onNewProjectClick = {
+                            viewModel.pausePlayback()
+                            if (state.hasAnyContent) {
+                                showNewProjectConfirmDialog = true
+                            } else {
+                                viewModel.createNewProject()
+                            }
+                        },
+                        onUndoClick = { viewModel.undo() },
+                        onRedoClick = { viewModel.redo() },
+                        onDraftsClick = {
+                            viewModel.pausePlayback()
+                            viewModel.refreshDrafts()
+                            showDraftsDialog = true
+                        },
+                        onExportClick = {
+                            viewModel.pausePlayback()
+                            showExportDialog = true
+                        }
                     )
                 }
-
-                PlaybackControlBar(
-                    isPlaying = state.isPlaying,
-                    currentPositionMs = state.currentPositionMs,
-                    totalDurationMs = state.finalTimelineDurationMs,
-                    isPreviewVisible = isPreviewVisible,
-                    onTogglePreview = { isPreviewVisible = !isPreviewVisible },
-                    onTogglePlayPause = { viewModel.togglePlayPause() },
-                    onSeek = { viewModel.seekTo(it) }
-                )
-
-                HorizontalDivider(
-                    thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
-
-                MultiTrackTimeline(
-                    clips = state.clips,
-                    selectedClipId = state.selectedClip?.id,
-                    audioConfig = state.audioConfig,
-                    subtitles = state.subtitles,
-                    freezeFrameExtensionMs = state.freezeFrameExtensionMs,
-                    autoLoopExtensionMs = state.autoLoopExtensionMs,
-                    currentPositionMs = state.currentPositionMs,
-                    onSelectClip = {
-                        viewModel.selectClip(it)
-                        viewModel.selectTab(EditorTab.CLIPS)
-                    },
-                    onOpenClipsTab = { viewModel.selectTab(EditorTab.CLIPS) },
-                    onOpenAudioTab = { viewModel.selectTab(EditorTab.AUDIO) },
-                    onOpenSubtitlesTab = { viewModel.selectTab(EditorTab.SUBTITLES) }
-                )
-
-                HorizontalDivider(
-                    thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
-
-                Box(
+            ) { innerPadding ->
+                BoxWithConstraints(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .navigationBarsPadding()
+                        .background(MaterialTheme.colorScheme.background)
                 ) {
-                    when (state.activeTab) {
-                        EditorTab.CLIPS -> ClipsTabPanel(
+                    val previewHeight = (maxHeight * 0.31f).coerceIn(170.dp, 260.dp)
+
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        AnimatedVisibility(
+                            visible = isPreviewVisible,
+                            enter = expandVertically(
+                                expandFrom = Alignment.Top,
+                                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+                            ) + fadeIn(animationSpec = tween(durationMillis = 180)),
+                            exit = shrinkVertically(
+                                shrinkTowards = Alignment.Top,
+                                animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                            ) + fadeOut(animationSpec = tween(durationMillis = 150))
+                        ) {
+                            LivePreviewCanvas(
+                                videoPlayer = viewModel.playerController.videoPlayer,
+                                hasClips = state.clips.isNotEmpty(),
+                                activeClip = currentPlayingClip,
+                                aspectRatio = state.aspectRatio,
+                                cropScaleMode = state.cropScaleMode,
+                                colorConfig = state.colorConfig,
+                                subtitles = state.subtitles,
+                                watermarkConfig = state.watermarkConfig,
+                                currentPositionMs = state.currentPositionMs,
+                                totalVideoDurationMs = state.totalVideoDurationMs,
+                                freezeFrameExtensionMs = state.freezeFrameExtensionMs,
+                                isInFreezeFrameZone = isInFreezeFrameZone,
+                                transitionVisual = transitionVisual,
+                                motionVisual = motionVisual,
+                                isFullscreen = false,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(previewHeight)
+                            )
+                        }
+
+                        PlaybackControlBar(
+                            isPlaying = state.isPlaying,
+                            currentPositionMs = state.currentPositionMs,
+                            totalDurationMs = state.finalTimelineDurationMs,
+                            isPreviewVisible = isPreviewVisible,
+                            onTogglePreview = { isPreviewVisible = !isPreviewVisible },
+                            onEnterFullscreen = {
+                                isPreviewVisible = true
+                                showFullscreenControls = true
+                                isFullscreenPreview = true
+                            },
+                            onTogglePlayPause = { viewModel.togglePlayPause() },
+                            onSeek = { viewModel.seekTo(it) }
+                        )
+
+                        HorizontalDivider(
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant
+                        )
+
+                        MultiTrackTimeline(
                             clips = state.clips,
                             selectedClipId = state.selectedClip?.id,
-                            transitionConfig = state.transitionConfig,
-                            hasLongerAudio = state.extraAudioExtensionMs > 0L,
-                            onSelectClip = { viewModel.selectClip(it) },
-                            onAddClips = { viewModel.addVideoClips(it) },
-                            onRemoveClip = { viewModel.removeClip(it) },
-                            onMoveUp = { viewModel.moveClipUp(it) },
-                            onMoveDown = { viewModel.moveClipDown(it) },
-                            onTrimClip = { id, s, e -> viewModel.updateClipTrim(id, s, e) },
-                            onImageDurationChange = { id, dur -> viewModel.updateImageDuration(id, dur) },
-                            onCutClip = { id -> viewModel.cutClipAtTimelinePosition(id, state.currentPositionMs) },
-                            onLoopCountChange = { id, count -> viewModel.setClipLoopCount(id, count) },
-                            onRotateClip = { viewModel.rotateClip90(it) },
-                            onMirrorClip = { viewModel.toggleClipMirror(it) },
-                            onMotionEffectChange = { id, eff -> viewModel.setClipMotionEffect(id, eff) },
-                            onMotionIntensityChange = { id, amt -> viewModel.setClipMotionIntensity(id, amt) },
-                            onApplyMotionToAll = { eff, amt -> viewModel.applyMotionEffectToAllClips(eff, amt) },
-                            onJoinModeChange = { viewModel.setJoinMode(it) },
-                            onTransitionTypeChange = { viewModel.setTransitionType(it) },
-                            onTransitionDurationChange = { viewModel.setTransitionDuration(it) },
-                            onEndBehaviorChange = { viewModel.setVideoEndBehavior(it) }
-                        )
-
-                        EditorTab.TEMPLATES -> TemplatesTabPanel(
-                            activeTemplateId = state.activeTemplateId,
-                            hasClips = state.clips.isNotEmpty(),
-                            onApplyTemplate = { template -> viewModel.applyTemplate(template) },
-                            onResetTemplate = { viewModel.resetTemplateToDefault() }
-                        )
-
-                        EditorTab.SPEED -> SpeedTabPanel(
-                            selectedClip = state.selectedClip,
-                            hasMultipleClips = state.clips.size > 1,
-                            onSpeedChange = { id, spd -> viewModel.setClipSpeed(id, spd) },
-                            onApplyToAll = { spd -> viewModel.applySpeedToAllClips(spd) }
-                        )
-
-                        EditorTab.COLOR -> ColorTabPanel(
-                            colorConfig = state.colorConfig,
-                            onPresetChange = { viewModel.setColorPreset(it) },
-                            onBrightnessChange = { viewModel.setBrightness(it) },
-                            onContrastChange = { viewModel.setContrast(it) },
-                            onSaturationChange = { viewModel.setSaturation(it) },
-                            onReset = { viewModel.resetColorConfig() }
-                        )
-
-                        EditorTab.AUDIO -> AudioTabPanel(
                             audioConfig = state.audioConfig,
-                            onSelectAudio = { uri, extracted -> viewModel.selectAudioTrack(uri, extracted) },
-                            onRemoveAudio = { viewModel.removeAudioTrack() },
-                            onStartOffsetChange = { viewModel.setAudioStartOffset(it) },
-                            onToggleMuteOriginal = { viewModel.toggleMuteOriginalAudio() },
-                            onOriginalVolumeChange = { viewModel.setOriginalVideoVolume(it) },
-                            onMusicVolumeChange = { viewModel.setMusicVolume(it) },
-                            onFadeInChange = { viewModel.setFadeInDuration(it) },
-                            onFadeOutChange = { viewModel.setFadeOutDuration(it) }
-                        )
-
-                        EditorTab.BEAT -> BeatTabPanel(
-                            currentPositionMs = state.currentPositionMs,
-                            beatMarkersMs = state.audioConfig.beatMarkersMs,
-                            hasClips = state.clips.isNotEmpty(),
-                            hasAudio = state.audioConfig.uri != null,
-                            isDetectingBeats = state.isDetectingBeats,
-                            onAutoDetectBeats = { viewModel.autoDetectBeats(it) },
-                            onAutoSyncClipsToBeats = { repeat -> viewModel.autoSyncClipsToBeats(repeat) },
-                            onTapBeat = { viewModel.addBeatMarkerAtCurrentPosition() },
-                            onSeekToBeat = { viewModel.seekTo(it) },
-                            onCutAtBeat = { viewModel.cutClipAtBeat(it) },
-                            onRemoveBeat = { viewModel.removeBeatMarker(it) },
-                            onClearBeats = { viewModel.clearBeatMarkers() }
-                        )
-
-                        EditorTab.CROP -> CropTabPanel(
-                            selectedRatio = state.aspectRatio,
-                            selectedScaleMode = state.cropScaleMode,
-                            onSelectRatio = { viewModel.setAspectRatio(it) },
-                            onSelectScaleMode = { viewModel.setCropScaleMode(it) }
-                        )
-
-                        EditorTab.SUBTITLES -> SubtitlesTabPanel(
                             subtitles = state.subtitles,
-                            onAddNewClick = {
-                                viewModel.pausePlayback()
-                                editingSubtitle = null
-                                showSubtitleDialog = true
+                            freezeFrameExtensionMs = state.freezeFrameExtensionMs,
+                            autoLoopExtensionMs = state.autoLoopExtensionMs,
+                            currentPositionMs = state.currentPositionMs,
+                            onSelectClip = {
+                                viewModel.selectClip(it)
+                                viewModel.selectTab(EditorTab.CLIPS)
                             },
-                            onImportLrcClick = { viewModel.importSubtitlesFromUri(it) },
-                            onEditClick = { item ->
-                                viewModel.pausePlayback()
-                                editingSubtitle = item
-                                showSubtitleDialog = true
-                            },
-                            onDeleteClick = { viewModel.removeSubtitle(it) },
-                            onClearAllClick = { viewModel.clearAllSubtitles() }
+                            onOpenClipsTab = { viewModel.selectTab(EditorTab.CLIPS) },
+                            onOpenAudioTab = { viewModel.selectTab(EditorTab.AUDIO) },
+                            onOpenSubtitlesTab = { viewModel.selectTab(EditorTab.SUBTITLES) }
                         )
 
-                        EditorTab.WATERMARK -> WatermarkTabPanel(
-                            config = state.watermarkConfig,
-                            onSelectLogo = { viewModel.selectWatermarkImage(it) },
-                            onRemoveLogo = { viewModel.removeWatermark() },
-                            onScaleChange = { viewModel.setWatermarkScale(it) },
-                            onOpacityChange = { viewModel.setWatermarkOpacity(it) },
-                            onPositionChange = { viewModel.setWatermarkPosition(it) }
+                        HorizontalDivider(
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant
                         )
 
-                        EditorTab.DEV_LOG -> DevLogTabPanel(
-                            logText = exportLogs,
-                            isCheckingUpdate = state.updateCheckState is UpdateCheckState.Checking,
-                            onCheckUpdateClick = { viewModel.checkForUpdatesManual() },
-                            onClearLog = { viewModel.clearExportLogs() }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        ) {
+                            when (state.activeTab) {
+                                EditorTab.CLIPS -> ClipsTabPanel(
+                                    clips = state.clips,
+                                    selectedClipId = state.selectedClip?.id,
+                                    transitionConfig = state.transitionConfig,
+                                    hasLongerAudio = state.extraAudioExtensionMs > 0L,
+                                    onSelectClip = { viewModel.selectClip(it) },
+                                    onAddClips = { viewModel.addVideoClips(it) },
+                                    onRemoveClip = { viewModel.removeClip(it) },
+                                    onMoveUp = { viewModel.moveClipUp(it) },
+                                    onMoveDown = { viewModel.moveClipDown(it) },
+                                    onTrimClip = { id, s, e -> viewModel.updateClipTrim(id, s, e) },
+                                    onImageDurationChange = { id, dur -> viewModel.updateImageDuration(id, dur) },
+                                    onCutClip = { id -> viewModel.cutClipAtTimelinePosition(id, state.currentPositionMs) },
+                                    onLoopCountChange = { id, count -> viewModel.setClipLoopCount(id, count) },
+                                    onRotateClip = { viewModel.rotateClip90(it) },
+                                    onMirrorClip = { viewModel.toggleClipMirror(it) },
+                                    onMotionEffectChange = { id, eff -> viewModel.setClipMotionEffect(id, eff) },
+                                    onMotionIntensityChange = { id, amt -> viewModel.setClipMotionIntensity(id, amt) },
+                                    onApplyMotionToAll = { eff, amt -> viewModel.applyMotionEffectToAllClips(eff, amt) },
+                                    onJoinModeChange = { viewModel.setJoinMode(it) },
+                                    onTransitionTypeChange = { viewModel.setTransitionType(it) },
+                                    onTransitionDurationChange = { viewModel.setTransitionDuration(it) },
+                                    onEndBehaviorChange = { viewModel.setVideoEndBehavior(it) }
+                                )
+
+                                EditorTab.TEMPLATES -> TemplatesTabPanel(
+                                    activeTemplateId = state.activeTemplateId,
+                                    hasClips = state.clips.isNotEmpty(),
+                                    onApplyTemplate = { template -> viewModel.applyTemplate(template) },
+                                    onResetTemplate = { viewModel.resetTemplateToDefault() }
+                                )
+
+                                EditorTab.SPEED -> SpeedTabPanel(
+                                    selectedClip = state.selectedClip,
+                                    hasMultipleClips = state.clips.size > 1,
+                                    onSpeedChange = { id, spd -> viewModel.setClipSpeed(id, spd) },
+                                    onApplyToAll = { spd -> viewModel.applySpeedToAllClips(spd) }
+                                )
+
+                                EditorTab.COLOR -> ColorTabPanel(
+                                    colorConfig = state.colorConfig,
+                                    onPresetChange = { viewModel.setColorPreset(it) },
+                                    onBrightnessChange = { viewModel.setBrightness(it) },
+                                    onContrastChange = { viewModel.setContrast(it) },
+                                    onSaturationChange = { viewModel.setSaturation(it) },
+                                    onReset = { viewModel.resetColorConfig() }
+                                )
+
+                                EditorTab.AUDIO -> AudioTabPanel(
+                                    audioConfig = state.audioConfig,
+                                    onSelectAudio = { uri, extracted -> viewModel.selectAudioTrack(uri, extracted) },
+                                    onRemoveAudio = { viewModel.removeAudioTrack() },
+                                    onStartOffsetChange = { viewModel.setAudioStartOffset(it) },
+                                    onToggleMuteOriginal = { viewModel.toggleMuteOriginalAudio() },
+                                    onOriginalVolumeChange = { viewModel.setOriginalVideoVolume(it) },
+                                    onMusicVolumeChange = { viewModel.setMusicVolume(it) },
+                                    onFadeInChange = { viewModel.setFadeInDuration(it) },
+                                    onFadeOutChange = { viewModel.setFadeOutDuration(it) }
+                                )
+
+                                EditorTab.BEAT -> BeatTabPanel(
+                                    currentPositionMs = state.currentPositionMs,
+                                    beatMarkersMs = state.audioConfig.beatMarkersMs,
+                                    hasClips = state.clips.isNotEmpty(),
+                                    hasAudio = state.audioConfig.uri != null,
+                                    isDetectingBeats = state.isDetectingBeats,
+                                    onAutoDetectBeats = { viewModel.autoDetectBeats(it) },
+                                    onAutoSyncClipsToBeats = { repeat -> viewModel.autoSyncClipsToBeats(repeat) },
+                                    onTapBeat = { viewModel.addBeatMarkerAtCurrentPosition() },
+                                    onSeekToBeat = { viewModel.seekTo(it) },
+                                    onCutAtBeat = { viewModel.cutClipAtBeat(it) },
+                                    onRemoveBeat = { viewModel.removeBeatMarker(it) },
+                                    onClearBeats = { viewModel.clearBeatMarkers() }
+                                )
+
+                                EditorTab.CROP -> CropTabPanel(
+                                    selectedRatio = state.aspectRatio,
+                                    selectedScaleMode = state.cropScaleMode,
+                                    onSelectRatio = { viewModel.setAspectRatio(it) },
+                                    onSelectScaleMode = { viewModel.setCropScaleMode(it) }
+                                )
+
+                                EditorTab.SUBTITLES -> SubtitlesTabPanel(
+                                    subtitles = state.subtitles,
+                                    onAddNewClick = {
+                                        viewModel.pausePlayback()
+                                        editingSubtitle = null
+                                        showSubtitleDialog = true
+                                    },
+                                    onImportLrcClick = { viewModel.importSubtitlesFromUri(it) },
+                                    onEditClick = { item ->
+                                        viewModel.pausePlayback()
+                                        editingSubtitle = item
+                                        showSubtitleDialog = true
+                                    },
+                                    onDeleteClick = { viewModel.removeSubtitle(it) },
+                                    onClearAllClick = { viewModel.clearAllSubtitles() }
+                                )
+
+                                EditorTab.WATERMARK -> WatermarkTabPanel(
+                                    config = state.watermarkConfig,
+                                    onSelectLogo = { viewModel.selectWatermarkImage(it) },
+                                    onRemoveLogo = { viewModel.removeWatermark() },
+                                    onScaleChange = { viewModel.setWatermarkScale(it) },
+                                    onOpacityChange = { viewModel.setWatermarkOpacity(it) },
+                                    onPositionChange = { viewModel.setWatermarkPosition(it) }
+                                )
+
+                                EditorTab.DEV_LOG -> DevLogTabPanel(
+                                    logText = exportLogs,
+                                    isCheckingUpdate = state.updateCheckState is UpdateCheckState.Checking,
+                                    onCheckUpdateClick = { viewModel.checkForUpdatesManual() },
+                                    onClearLog = { viewModel.clearExportLogs() }
+                                )
+                            }
+                        }
+
+                        EditorTabBar(
+                            activeTab = state.activeTab,
+                            onSelectTab = { viewModel.selectTab(it) }
                         )
                     }
                 }
-
-                EditorTabBar(
-                    activeTab = state.activeTab,
-                    onSelectTab = { viewModel.selectTab(it) }
+            }
+        } else {
+            val tapInteraction = remember { MutableInteractionSource() }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clickable(
+                        interactionSource = tapInteraction,
+                        indication = null
+                    ) {
+                        showFullscreenControls = !showFullscreenControls
+                    }
+            ) {
+                LivePreviewCanvas(
+                    videoPlayer = viewModel.playerController.videoPlayer,
+                    hasClips = state.clips.isNotEmpty(),
+                    activeClip = currentPlayingClip,
+                    aspectRatio = state.aspectRatio,
+                    cropScaleMode = state.cropScaleMode,
+                    colorConfig = state.colorConfig,
+                    subtitles = state.subtitles,
+                    watermarkConfig = state.watermarkConfig,
+                    currentPositionMs = state.currentPositionMs,
+                    totalVideoDurationMs = state.totalVideoDurationMs,
+                    freezeFrameExtensionMs = state.freezeFrameExtensionMs,
+                    isInFreezeFrameZone = isInFreezeFrameZone,
+                    transitionVisual = transitionVisual,
+                    motionVisual = motionVisual,
+                    isFullscreen = true,
+                    modifier = Modifier.fillMaxSize()
                 )
+
+                AnimatedVisibility(
+                    visible = showFullscreenControls,
+                    enter = fadeIn(animationSpec = tween(180)),
+                    exit = fadeOut(animationSpec = tween(180)),
+                    modifier = Modifier.align(Alignment.TopCenter)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.58f))
+                            .statusBarsPadding()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                                .border(
+                                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { isFullscreenPreview = false }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.FullscreenExit,
+                                contentDescription = "Keluar Skrin Penuh",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Keluar Skrin Penuh",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
+                                .border(
+                                    BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.50f)),
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = state.aspectRatio.label,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = showFullscreenControls,
+                    enter = fadeIn(animationSpec = tween(180)),
+                    exit = fadeOut(animationSpec = tween(180)),
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                ) {
+                    val playEnabled = state.finalTimelineDurationMs > 0L
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.65f))
+                            .navigationBarsPadding()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (playEnabled) {
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    }
+                                )
+                                .border(
+                                    BorderStroke(
+                                        1.dp,
+                                        if (playEnabled) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.outlineVariant
+                                        }
+                                    ),
+                                    CircleShape
+                                )
+                                .clickable(enabled = playEnabled) { viewModel.togglePlayPause() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (state.isPlaying) "Jeda" else "Main",
+                                tint = if (playEnabled) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    Color.White.copy(alpha = 0.5f)
+                                },
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Text(
+                            text = TimeFormatter.formatDurationMs(state.currentPositionMs),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+
+                        val maxVal = state.finalTimelineDurationMs.coerceAtLeast(1L).toFloat()
+                        Slider(
+                            value = state.currentPositionMs.coerceIn(0L, state.finalTimelineDurationMs).toFloat(),
+                            onValueChange = { viewModel.seekTo(it.toLong()) },
+                            valueRange = 0f..maxVal,
+                            enabled = playEnabled,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.30f)
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(30.dp)
+                        )
+
+                        Text(
+                            text = TimeFormatter.formatDurationMs(state.finalTimelineDurationMs),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.80f)
+                        )
+                    }
+                }
             }
         }
     }
